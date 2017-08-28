@@ -3,7 +3,7 @@ import numpy as np
 import scipy
 import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
-from bm import conv_net,cost_func, gradient_modify
+from base_model import conv_net, variable_summaries
 
 class mean_var_net():
     def __init__(self, data, n_input = 784, n_classes = 2):
@@ -11,21 +11,34 @@ class mean_var_net():
         self.n_input = n_input
         self.n_classes = n_classes
 
-    def __variables_set__(self, strides=[1,1,2,2,1,1,2,2]):
+    def __construct_net__(self, strides=[1,2,1,2,1,2,1,2]):
+        with tf.variable_scope('input'):
+            self.x = tf.placeholder(tf.float32, shape=[None, self.n_input],name='x')
+            self.y = tf.placeholder(tf.float32, shape=[None, self.n_classes],name='y')
 
-    def __construct_net__(self, strides=[1,1,2,2,1,1,2,2]):
+        with tf.variables_scope('hyperparameter'):
+            self.keep_prob = tf.placeholder(tf.float32, name='dropout')
+            self.learning_rate = tf.placeholder(tf.float32, name='learning_rate')
 
-        self.x = tf.placeholder(tf.float32, [None, self.n_input])
-        self.y = tf.placeholder(tf.float32, [None, self.n_classes])
-        self.keep_prob = tf.placeholder(tf.float32)
-        self.learning_rate = tf.placeholder(tf.float32)
-        self.mean_net = conv_net(self.x, self.weights_mean, self.biases_mean,
-                                 self.keep_prob, strides[:4])
-        self.var_net = 1/(1+tf.exp(-conv_net(self.x, self.weights_var, self.biases_var,
-                                self.keep_prob, strides[4:])))
+        with tf.variables_scope('mean_net'):
+            self.mean_net = conv_net('mean_net')
+            self.mean_net.network(x=self.x, n_input=self.n_input, n_output=self.n_classes-1,
+                                  dropout=self.keep_prob, strides=strides[:4],initializer="xavier")
+            with tf.variables_scope('output'):
+                self.mean_out = self.mean_net.out
 
+        with tf.variables_scope('var_net'):
+            self.var_net = conv_net('var_net')
+            self.var_net.network(x=self.x, n_input=self.n_input, n_output=self.n_classes-1,
+                                  dropout=self.keep_prob, strides=strides[4:],initializer="xavier")
+            with tf.variables_scope('output'):
+                self.var_out = 10*tf.sigmoid(self.mean_net.out)
+                tf.histogram_summary("var_net/output/act_output", self.var_out)
 
     def __define_measure__(self):
+        self.sample_size = tf.placeholder(tf.int32)
+        with tf.variables_scope('accuracy'):
+
 
     def __optimization__(self, learning_rate=0.001):
 
