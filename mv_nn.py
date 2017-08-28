@@ -66,7 +66,7 @@ class mean_var_net():
                                  n_output=self.n_classes-1, dropout=self.keep_prob,
                                  strides=strides[4:],initializer="xavier")
             with tf.variable_scope('output'):
-                self.var_net.out = 10*tf.sigmoid(self.mean_net.out)
+                self.var_net.out = 10*tf.sigmoid(self.var_net.out)
                 tf.summary.histogram("var_net/output/act_output", self.var_net.out)
 
     def __define_measure__(self):
@@ -78,14 +78,16 @@ class mean_var_net():
                 correct_pred = tf.equal(tf.argmax(class_score, 1),
                                         tf.argmax(self.y, 1))
             with tf.variable_scope('accuracy'):
-                accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
-            tf.summary.scalar('accuracy', accuracy)
+                self.accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
+            tf.summary.scalar('accuracy', self.accuracy)
 
-        with tf.variable_scope('cost'):
             with tf.variable_scope('virtual_cost'):
                 self.virtual_cost = tf.add(self.mean_net.out,self.var_net.out)
             with tf.variable_scope('true_cost'):
                 self.cost = cost_func(self.mean_net.out,self.var_net.out,self.y)
+                self.validation_cost = cost_func(self.mean_net.out,self.var_net.out,self.y)
+            tf.summary.scalar('train_cost', self.cost)
+            tf.summary.scalar('validation_cost', self.validation_cost)
 
 
     def __optimization__(self, learning_rate=0.001):
@@ -97,8 +99,6 @@ class mean_var_net():
             with tf.variable_scope("gradient"):
                 self.grad_mod1,self.grad_mod2 = gradient_modify(self.mean_net.out, self.var_net.out,
                                                                 self.y, self.sample_size)
-                variable_summaries(self.grad_mod1, "optimization/gradient/mean_gradient")
-                variable_summaries(self.grad_mod2, "optimization/gradient/var_gradient")
 
                 gradient1 = optimizer.compute_gradients(loss=self.virtual_cost,
                                                         var_list=self.mean_variable,
@@ -108,9 +108,12 @@ class mean_var_net():
                                                         grad_loss=self.grad_mod1)
                 self.apply_gradients = optimizer.apply_gradients(gradient1+gradient2)
 
+            variable_summaries(self.grad_mod1, "gradient/mean_gradient")
+            variable_summaries(self.grad_mod2, "gradient/var_gradient")
+
     def train_net(self, training_iters = 20000, learning_rate = 0.001,
                    batch_size = 100, display_step = 1, dropout = 0.75,
-                   strides = [1,1,2,2,1,1,2,2]):
+                   strides = [1,2,1,2,1,2,1,2]):
 
         # Initializing the variables
         self.__construct_net__(strides=strides)
@@ -130,11 +133,20 @@ class mean_var_net():
             while step * batch_size <= training_iters:
                 batch_x, batch_y = self.data.train.next_batch(batch_size)
                 # Run optimization op (backprop)
+                mean,var = sess.run([self.mean_net.out,self.var_net.out], feed_dict = {self.x: batch_x,
+                                                                self.y: batch_y,
+                                                                self.keep_prob: dropout})
+
                 summary, _ = sess.run([merged, self.apply_gradients], feed_dict={self.x: batch_x,
                                                                                  self.y: batch_y,
                                                                                  self.keep_prob: dropout,
                                                                                  self.learning_rate: learning_rate,
                                                                                  self.sample_size: batch_y.shape[0]})
+
+                sess.run(self.validation_cost, feed_dict={self.x: self.data.validation.images,
+                                                          self.y: self.data.validation._labels,
+                                                          self.sample_size: self.data.validation._labels.shape[0],
+                                                          self.keep_prob: 1.})
                 train_writer.add_summary(summary, step)
                 # display training intermediate result
 
@@ -148,6 +160,7 @@ class mean_var_net():
                           "{:.6f}".format(loss) + ", Training Accuracy= " + \
                           "{:.5f}".format(acc))
 
+
                 step += 1
 
             print("Optimization Finished!")
@@ -159,12 +172,16 @@ if __name__ == '__main__':
     # set attributes to write = True
     mnist.test.labels.setflags(write = 1)
     mnist.train.labels.setflags(write = 1)
+    mnist.validation.labels.setflags(write=1)
     mnist.train.labels[mnist.train.labels <= 4] = 0
     mnist.train.labels[mnist.train.labels > 4] = 1
     mnist.test.labels[mnist.test.labels <= 4] = 0
     mnist.test.labels[mnist.test.labels > 4] = 1
+    mnist.validation.labels[mnist.validation.labels <= 4] = 0
+    mnist.validation.labels[mnist.validation.labels > 4] = 1
     # modify labels for one_hot
     mnist.train._labels = np.eye(2)[mnist.train.labels]
     mnist.test._labels = np.eye(2)[mnist.test.labels]
+    mnist.validation._labels = np.eye(2)[mnist.validation.labels]
     mvnn = mean_var_net(data=mnist)
-    mvnn.train_net(training_iters=20000, learning_rate =0.001,batch_size=128, display_step=10)
+    mvnn.train_net(training_iters=20000, learning_rate =0.001,batch_size=128, display_step=2)

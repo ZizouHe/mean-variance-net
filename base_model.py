@@ -12,10 +12,10 @@ def maxpool2d(x, k=2):
 
 def variable_summaries(var, name):
     """Attach a lot of summaries to a Tensor."""
-    with tf.name_scope('summaries'):
+    with tf.variable_scope('summaries'):
         mean = tf.reduce_mean(var)
         tf.summary.scalar('mean/' + name, mean)
-        with tf.name_scope('stddev'):
+        with tf.variable_scope('stddev'):
             stddev = tf.sqrt(tf.reduce_sum(tf.square(var - mean)))
         tf.summary.scalar('sttdev/' + name, stddev)
         tf.summary.scalar('max/' + name, tf.reduce_max(var))
@@ -37,12 +37,12 @@ class conv_net():
                 self.variables[layer_name+'_w'] = tf.get_variable(name= 'weight',shape=input_dim+output_dim,
                                                                   dtype=tf.float32, initializer=initializer)
 
-                variable_summaries(self.variables[layer_name+'_w'], self.name+"/"+layer_name+'/weight')
+
             with tf.variable_scope("bias"):
                 self.variables[layer_name+'_b'] = tf.get_variable(name= 'bias',shape=output_dim,
                                                                   dtype=tf.float32, initializer=initializer)
-
-                variable_summaries(self.variables[layer_name+'_b'], self.name+"/"+layer_name+'/bias')
+        variable_summaries(self.variables[layer_name+'_w'], self.name+"/"+layer_name+'/weight')
+        variable_summaries(self.variables[layer_name+'_b'], self.name+"/"+layer_name+'/bias')
 
     def __set_variable__(self, initializer, strides=[1,2,1,2]):
 
