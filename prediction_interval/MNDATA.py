@@ -27,7 +27,7 @@ class mndata():
         scale arg is True if pixel range is 0~255.
         """
         # load data from original MNIST dataset
-        self._data = MNIST('./MNIST_data/')
+        self._data = MNIST('../MNIST_data/')
         self._classnum = NUM_CLASSES
         self._one_hot = False
         self._relabel = False
