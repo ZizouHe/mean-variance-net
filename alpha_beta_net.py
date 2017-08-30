@@ -6,12 +6,10 @@ Created on Tue Aug 29 11:50:48 2017
 @author: Zizou
 """
 
-from base_model import conv_net, variable_summaries
+from base_model import conv_net, variable_summaries, mnist_modify
 import numpy as np
 import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
-
-
 
 def cost_func(alpha, beta, y):
     def beta_func(vector):
@@ -46,6 +44,7 @@ class alpha_beta_net():
             self.alpha_net.network(x=self.x, n_input=self.n_input,
                                    n_output=self.n_classes-1, dropout=self.keep_prob,
                                    strides=strides[:4], initializer="truncated")
+            self.alpha_net.out = tf.nn.relu(self.alpha_net.out)
 
             with tf.variable_scope('output'):
                 #self.alpha_net.out = tf.sigmoid(self.alpha_net.out)
@@ -56,6 +55,7 @@ class alpha_beta_net():
             self.beta_net.network(x=self.x, n_input=self.n_input,
                                    n_output=self.n_classes-1, dropout=self.keep_prob,
                                    strides=strides[4:], initializer="truncated")
+            self.beta_net.out = tf.nn.relu(self.beta_net.out)
 
             with tf.variable_scope('output'):
                 #self.beta_net.out = tf.sigmoid(self.beta_net.out)
@@ -131,20 +131,9 @@ class alpha_beta_net():
 if __name__ == '__main__':
     # read and munipulate data
     mnist = input_data.read_data_sets("MNIST_data/", one_hot=False)
-    # set attributes to write = True
-    mnist.test.labels.setflags(write = 1)
-    mnist.train.labels.setflags(write = 1)
-    mnist.validation.labels.setflags(write=1)
     # Change labels 0~9 to {0,1}
-    mnist.train.labels[mnist.train.labels <= 4] = 0
-    mnist.train.labels[mnist.train.labels > 4] = 1
-    mnist.test.labels[mnist.test.labels <= 4] = 0
-    mnist.test.labels[mnist.test.labels > 4] = 1
-    mnist.validation.labels[mnist.validation.labels <= 4] = 0
-    mnist.validation.labels[mnist.validation.labels > 4] = 1
-    # modify labels for one_hot
-    mnist.train._labels = np.eye(2)[mnist.train.labels]
-    mnist.test._labels = np.eye(2)[mnist.test.labels]
-    mnist.validation._labels = np.eye(2)[mnist.validation.labels]
+    mnist_modify(mnist, {0:range(0,5), 1:range(5,10)}, one_hot=True)
+    # Construct and train network
     abnn = alpha_beta_net(data = mnist)
-    abnn.train_net(training_iters=20000, learning_rate=0.001, batch_size=128, display_step=1)
+    abnn.train_net(training_iters=20000, learning_rate=0.001,
+                   batch_size=128, display_step=1)
