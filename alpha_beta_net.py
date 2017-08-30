@@ -11,8 +11,18 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
 
+
+
 def cost_func(alpha, beta, y):
-    return y
+    def beta_func(vector):
+        nomi = tf.multiply(tf.exp(tf.lgamma(vector[0])), tf.exp(tf.lgamma(vector[1])))
+        deno = tf.exp(tf.lgamma(tf.add(vector[0],vector[1])))
+        return tf.div(nomi,deno)
+
+    output = tf.concat([alpha, beta],1)
+    cost = tf.div(tf.map_fn(beta_func, tf.add(output, y)),
+                  tf.map_fn(beta_func, output))
+    return -tf.reduce_mean(tf.log(cost))
 
 class alpha_beta_net():
     def __init__(self, data, n_input = 784, n_classes = 2):
@@ -35,17 +45,17 @@ class alpha_beta_net():
             self.alpha_net = conv_net('alpha_net')
             self.alpha_net.network(x=self.x, n_input=self.n_input,
                                    n_output=self.n_classes-1, dropout=self.keep_prob,
-                                   strides=strides[:4], initializer="xavier")
+                                   strides=strides[:4], initializer="truncated")
 
             with tf.variable_scope('output'):
                 #self.alpha_net.out = tf.sigmoid(self.alpha_net.out)
                 variable_summaries(self.alpha_net.out, 'values')
 
         with tf.variable_scope('beta_net'):
-            self.alpha_net = conv_net('beta_net')
-            self.alpha_net.network(x=self.x, n_input=self.n_input,
+            self.beta_net = conv_net('beta_net')
+            self.beta_net.network(x=self.x, n_input=self.n_input,
                                    n_output=self.n_classes-1, dropout=self.keep_prob,
-                                   strides=strides[4:], initializer="xavier")
+                                   strides=strides[4:], initializer="truncated")
 
             with tf.variable_scope('output'):
                 #self.beta_net.out = tf.sigmoid(self.beta_net.out)
@@ -54,7 +64,7 @@ class alpha_beta_net():
     def __define_measure__(self):
         with tf.variable_scope('accuracy'):
             with tf.variable_scope('correct_prediction'):
-                correct_pred = tf.equal(tf.argmax(tf.concat([self.alpha_net.out
+                correct_pred = tf.equal(tf.argmax(tf.concat([self.alpha_net.out,
                                                              self.beta_net.out],1),1),
                                         tf.argmax(self.y,1))
             with tf.variable_scope('accuracy'):
@@ -63,7 +73,7 @@ class alpha_beta_net():
 
         with tf.variable_scope('cost'):
             self.cost = cost_func(self.alpha_net.out,self.beta_net.out,self.y)
-            self.validation_cost = cost_func(self.mean,self.var,self.y)
+            self.validation_cost = cost_func(self.alpha_net.out,self.beta_net.out,self.y)
         tf.summary.scalar('train_cost', self.cost)
         tf.summary.scalar('validation_cost', self.validation_cost)
 
@@ -84,6 +94,7 @@ class alpha_beta_net():
             sess.run(init)
             step = 1
 
+            # $ tensorboard --logdir=./summary_abnet
             train_writer = tf.summary.FileWriter('./summary_abnet',
                                                   sess.graph)
 
@@ -136,4 +147,4 @@ if __name__ == '__main__':
     mnist.test._labels = np.eye(2)[mnist.test.labels]
     mnist.validation._labels = np.eye(2)[mnist.validation.labels]
     abnn = alpha_beta_net(data = mnist)
-    abnn.train_net(training_iters=20000, learning_rate=0.001, batch_size=128, display_step=5)
+    abnn.train_net(training_iters=20000, learning_rate=0.001, batch_size=128, display_step=1)
