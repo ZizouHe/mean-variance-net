@@ -163,8 +163,8 @@ class conv_net():
         initializer: the choice of initialization method for layer weights and biases
         """
         # Calculate mean and variance in case of truncated_normal initialization
-        var = 0.2/sqrt(np.prod(np.array(input_dim)))
-        mean = var*2 + 1e-4
+        var = 0.02/sqrt(np.prod(np.array(input_dim)))
+        mean = var*2 + 1e-6
         with tf.variable_scope(layer_name):
             with tf.variable_scope("weight"):
                 self.variables[layer_name+'_w'] = initial_variable(name= 'weight',shape=input_dim+output_dim,
@@ -250,3 +250,40 @@ class conv_net():
             tf.summary.histogram(self.name+"/output/preact_output", self.out)
 
         return self.out
+
+def label_modify(array, label_dict):
+    """
+    label modification method
+
+    Parameters
+    ----------
+    array: np.array
+    label_dict: mapping dictionary, with key the new label;
+                                         value the list of old label
+    """
+    for key, value in label_dict.items():
+        array[np.isin(array, value)] = key
+
+def mnist_modify(data, label_dict, one_hot=False):
+    """
+    label modification method for mnist dataset
+
+    Parameters
+    ----------
+    data: mnist dataset object
+    label_dict: mapping dictionary, with key the new label;
+                                         value the list of old label
+    one_hot: whether use one_hot representation or not
+    """
+    # set attributes to write = True
+    data.test.labels.setflags(write = 1)
+    data.train.labels.setflags(write = 1)
+    data.validation.labels.setflags(write=1)
+    data.test.labels = label_modify(data.test.labels, label_dict)
+    data.train.labels = label_modify(data.train.labels, label_dict)
+    data.validation.labels = label_modify(data.validation.labels, label_dict)
+    # modify labels for one_hot
+    if one_hot = True:
+        data.train._labels = np.eye(2)[data.train.labels]
+        data.test._labels = np.eye(2)[data.test.labels]
+        data.validation._labels = np.eye(2)[data.validation.labels]
