@@ -13,7 +13,7 @@ import numpy as np
 import scipy
 import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
-from base_model import conv_net, variable_summaries
+from base_model import conv_net, variable_summaries, mnist_modify
 
 
 def cost_func(pred_mean, pred_var, y):
@@ -319,21 +319,8 @@ class mean_var_net():
 if __name__ == '__main__':
     # read and munipulate data
     mnist = input_data.read_data_sets("MNIST_data/", one_hot=False)
-    # set attributes to write = True
-    mnist.test.labels.setflags(write = 1)
-    mnist.train.labels.setflags(write = 1)
-    mnist.validation.labels.setflags(write=1)
     # Change labels 0~9 to {0,1}
-    mnist.train.labels[mnist.train.labels <= 4] = 0
-    mnist.train.labels[mnist.train.labels > 4] = 1
-    mnist.test.labels[mnist.test.labels <= 4] = 0
-    mnist.test.labels[mnist.test.labels > 4] = 1
-    mnist.validation.labels[mnist.validation.labels <= 4] = 0
-    mnist.validation.labels[mnist.validation.labels > 4] = 1
-    # modify labels for one_hot
-    mnist.train._labels = np.eye(2)[mnist.train.labels]
-    mnist.test._labels = np.eye(2)[mnist.test.labels]
-    mnist.validation._labels = np.eye(2)[mnist.validation.labels]
+    mnist_modify(mnist, {0:range(0,5), 1:range(5,10)}, one_hot=True)
     # Construct and train network
     mvnn = mean_var_net(data=mnist)
     mvnn.train_net(training_iters=40000, learning_rate =0.001,batch_size=128, display_step=10)
