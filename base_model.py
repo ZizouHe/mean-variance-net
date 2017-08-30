@@ -10,6 +10,7 @@ Construct basic CNN model
 
 import tensorflow as tf
 import numpy as np
+from math import sqrt
 
 def conv2d(x, W, b, strides=1):
     """
@@ -71,6 +72,48 @@ def variable_summaries(var, name):
         tf.summary.scalar('min/' + name, tf.reduce_min(var))
         tf.summary.histogram(name, var)
 
+def initial_variable(name, shape, dtype, initializer, mean=None, var=None):
+    """
+    Customized initialization methods
+
+    Parameters
+    ----------
+    shape: list-like/array-like variable shape
+    dtype: data type
+    initializer: option: he, xavier, truncated(truncated normal),
+                         constant(usually for biases), more to come...
+    mean: set mean for truncated and constant methods
+    var: set variance for truncated method
+
+    Return
+    ------
+    a tensor: initialized variable with given options
+    """
+    if initializer == "xavier":
+        return tf.get_variable(name=name, shape=shape, dtype=dtype,
+                               initializer=tf.contrib.layers.xavier_initializer(uniform=True))
+
+    elif initializer == "he":
+        return tf.get_variable(name=name, shape=shape, dtype=dtype,
+                               initializer=tf.contrib.layers.variance_scaling_initializer(uniform=False))
+
+    elif initializer == "truncated":
+        # mean and variance should be defined for truncated normal
+        if not mean or not var:
+            raise ValueError("Initializer error: mean and var should be defined for truncated normal.")
+        initial = tf.truncated_normal(shape, mean=mean, stddev=0.01)
+        return tf.Variable(initial, name=name, dtype=dtype)
+
+    elif initializer == "constant":
+        # mean should be defined for constant
+        if not mean:
+            raise ValueError("Initializer error: mean should be defined for constant.")
+        initial = tf.constant(mean, shape=shape)
+        return tf.Variable(initial, name=name, dtype=dtype)
+
+    # one valid method should be chosen
+    else:
+        raise ValueError("Initializer error: choose a valid initializer")
 
 class conv_net():
     """
@@ -102,16 +145,12 @@ class conv_net():
         Attributes
         ----------
         name: network name
-        izdict: initializer dict, currently includes Xavier's and He's initialization methods
         variables: variables dict of whole network
         """
         self.name = name
-        self.izdict = {"xavier": tf.contrib.layers.xavier_initializer(uniform=True),
-                        "He": tf.contrib.layers.variance_scaling_initializer(factor=2.0, mode='FAN_IN',
-                                                                             uniform=False)}
         self.variables = {}
 
-    def nn_layer(self, input_dim, output_dim, layer_name, initializer="xavier"):
+    def nn_layer(self, input_dim, output_dim, layer_name, initializer="he"):
         """
         Reusable code for making a simple neural net layer.
         Construct with structure that can be shown in Tensorboard.
@@ -123,16 +162,19 @@ class conv_net():
         layer_name: layer name
         initializer: the choice of initialization method for layer weights and biases
         """
-        initializer = self.izdict[initializer]
+        # Calculate mean and variance in case of truncated_normal initialization
+        var = 0.2/sqrt(np.prod(np.array(input_dim)))
+        mean = var*2 + 1e-4
         with tf.variable_scope(layer_name):
             with tf.variable_scope("weight"):
-                self.variables[layer_name+'_w'] = tf.get_variable(name= 'weight',shape=input_dim+output_dim,
-                                                                  dtype=tf.float32, initializer=initializer)
+                self.variables[layer_name+'_w'] = initial_variable(name= 'weight',shape=input_dim+output_dim,
+                                                                   dtype=tf.float32, initializer=initializer,
+                                                                   mean=mean, var=var)
 
 
             with tf.variable_scope("bias"):
-                self.variables[layer_name+'_b'] = tf.get_variable(name= 'bias',shape=output_dim,
-                                                                  dtype=tf.float32, initializer=initializer)
+                self.variables[layer_name+'_b'] = initial_variable(name= 'bias',shape=output_dim, dtype=tf.float32,
+                                                                   initializer="constant", mean=mean)
         # Record variable summaries
         variable_summaries(self.variables[layer_name+'_w'], self.name+"/"+layer_name+'/weight')
         variable_summaries(self.variables[layer_name+'_b'], self.name+"/"+layer_name+'/bias')
@@ -146,7 +188,7 @@ class conv_net():
         self.nn_layer([full_size*64], [1024], "fcon1", initializer)
         self.nn_layer([1024], [self.n_output], "output", initializer)
 
-    def network(self, x, n_input, n_output, dropout, strides, initializer="xavier"):
+    def network(self, x, n_input, n_output, dropout, strides, initializer="he"):
         """
         Construct Convolution network.
 
@@ -161,7 +203,7 @@ class conv_net():
             2. max_pool layer 1 ksize and strides size
             3. conv layer 2 stride size
             4. max_pool layer 2 ksize and strides size
-        initializer: the choice of initialization method
+        initializer: initialization methods
 
         Attributes
         ----------
@@ -175,7 +217,7 @@ class conv_net():
         """
         self.n_input = n_input
         self.n_output = n_output
-        self.__set_variable__(initializer=initializer, strides=strides)
+        self.__set_variable__(strides=strides, initializer=initializer)
 
         x = tf.reshape(x, shape=[-1, int(np.sqrt(n_input)), int(np.sqrt(n_input)), 1])
         with tf.variable_scope('conv1'):
