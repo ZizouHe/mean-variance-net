@@ -180,7 +180,7 @@ class alpha_beta_net():
             step = 1
             # Record train data
             # $ tensorboard --logdir=./summary_abnet
-            train_writer = tf.summary.FileWriter('./summary_abnet',
+            train_writer = tf.summary.FileWriter('./tensorboard_abnet',
                                                   sess.graph)
 
             # Keep training until reach max iterations

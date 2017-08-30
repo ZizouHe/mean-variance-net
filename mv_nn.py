@@ -273,7 +273,7 @@ class mean_var_net():
             sess.run(init)
             step = 1
             # Record train data
-            train_writer = tf.summary.FileWriter('./summary_data/train',
+            train_writer = tf.summary.FileWriter('./tensorboard_mvnet',
                                                   sess.graph)
 
             # Keep training until reach max iterations

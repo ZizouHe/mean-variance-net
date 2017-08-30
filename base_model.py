@@ -279,11 +279,11 @@ def mnist_modify(data, label_dict, one_hot=False):
     data.test.labels.setflags(write = 1)
     data.train.labels.setflags(write = 1)
     data.validation.labels.setflags(write=1)
-    data.test.labels = label_modify(data.test.labels, label_dict)
-    data.train.labels = label_modify(data.train.labels, label_dict)
-    data.validation.labels = label_modify(data.validation.labels, label_dict)
+    label_modify(data.test.labels, label_dict)
+    label_modify(data.train.labels, label_dict)
+    label_modify(data.validation.labels, label_dict)
     # modify labels for one_hot
-    if one_hot = True:
+    if one_hot == True:
         data.train._labels = np.eye(2)[data.train.labels]
         data.test._labels = np.eye(2)[data.test.labels]
         data.validation._labels = np.eye(2)[data.validation.labels]
