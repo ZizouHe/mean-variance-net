@@ -151,9 +151,9 @@ class mean_var_net():
             # Use He's initialization
             self.mean_net.network(x=self.x, n_input=self.n_input,
                                   n_output=self.n_classes-1, dropout=self.keep_prob,
-                                  strides=strides[:4],initializer="He")
+                                  strides=strides[:4])
 
-            with tf.variable_scope('mean_net'):
+            with tf.variable_scope('output'):
                 # Add activation function on output, scale mean output to [-10,10]
                 self.mean = 10*tf.tanh(self.mean_net.out)
                 variable_summaries(self.mean, "values")
@@ -163,7 +163,7 @@ class mean_var_net():
             # Use Xavier's initialization
             self.var_net.network(x=self.x, n_input=self.n_input,
                                  n_output=self.n_classes-1, dropout=self.keep_prob,
-                                 strides=strides[4:], initializer="xavier")
+                                 strides=strides[4:])
 
             with tf.variable_scope('output'):
                 # Add activation function on output, scale var output to [0.03,10.03]
