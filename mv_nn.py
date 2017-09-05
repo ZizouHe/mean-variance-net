@@ -135,36 +135,36 @@ class mean_var_net():
         mean: mean network output
         var: var network output
         """
-        with tf.variable_scope('input'):
+        with tf.variable_scope('input', reuse=None):
             self.x = tf.placeholder(tf.float32, shape=[None, self.n_input],name='x')
             self.y = tf.placeholder(tf.float32, shape=[None, self.n_classes],name='y')
 
-        with tf.variable_scope('hyperparameter'):
+        with tf.variable_scope('hyperparameter', reuse=None):
             self.keep_prob = tf.placeholder(tf.float32, name='dropout')
             tf.summary.scalar('dropout_keep_probability', self.keep_prob)
             self.learning_rate = tf.placeholder(tf.float32, name='learning_rate')
             tf.summary.scalar('learning_rate', self.learning_rate)
 
-        with tf.variable_scope('mean_net'):
+        with tf.variable_scope('mean_net', reuse=None):
             self.mean_net = conv_net('mean_net')
             # Use He's initialization
             self.mean_net.network(x=self.x, n_input=self.n_input,
                                   n_output=self.n_classes-1, dropout=self.keep_prob,
                                   strides=strides[:4], initializer="he")
 
-            with tf.variable_scope('output'):
+            with tf.variable_scope('output', reuse=None):
                 # Add activation function on output, scale mean output to [-10,10]
                 self.mean = 10*tf.tanh(self.mean_net.out)
                 variable_summaries(self.mean, "values")
 
-        with tf.variable_scope('var_net'):
+        with tf.variable_scope('var_net', reuse=None):
             self.var_net = conv_net('var_net')
             # Use Xavier's initialization
             self.var_net.network(x=self.x, n_input=self.n_input,
                                  n_output=self.n_classes-1, dropout=self.keep_prob,
                                  strides=strides[4:], initializer="truncated")
 
-            with tf.variable_scope('output'):
+            with tf.variable_scope('output', reuse=None):
                 # Add activation function on output, scale var output to [0.03,10.03]
                 self.var = 10*tf.sigmoid(self.var_net.out)+0.03
                 variable_summaries(self.var, 'values')
@@ -182,20 +182,20 @@ class mean_var_net():
         validation_cost: cost function value on validation set
         """
         self.sample_size = tf.placeholder(tf.int32)
-        with tf.variable_scope('accuracy'):
+        with tf.variable_scope('accuracy', reuse=None):
             # compute class score
             class_score = tf.concat([tf.zeros([self.sample_size, 1], tf.float32),
                                      self.mean_net.out],1)
-            with tf.variable_scope('correct_prediction'):
+            with tf.variable_scope('correct_prediction', reuse=None):
                 correct_pred = tf.equal(tf.argmax(class_score, 1),
                                         tf.argmax(self.y, 1))
-            with tf.variable_scope('accuracy'):
+            with tf.variable_scope('accuracy', reuse=None):
                 self.accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
             tf.summary.scalar('accuracy', self.accuracy)
 
-            with tf.variable_scope('virtual_cost'):
+            with tf.variable_scope('virtual_cost', reuse=None):
                 self.virtual_cost = tf.add(self.mean,self.var)
-            with tf.variable_scope('true_cost'):
+            with tf.variable_scope('true_cost', reuse=None):
                 self.cost = cost_func(self.mean,self.var,self.y)
                 self.validation_cost = cost_func(self.mean,self.var,self.y)
             tf.summary.scalar('train_cost', self.cost)
@@ -215,12 +215,12 @@ class mean_var_net():
         grad_mod2: var net gradient on acutual cost function
         apply_gradients: apply real gradients on network weights and biases
         """
-        with tf.variable_scope('optimization'):
+        with tf.variable_scope('optimization', reuse=None):
             optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
-            with tf.variable_scope("variables"):
+            with tf.variable_scope("variables", reuse=None):
                 self.mean_variable = list(self.mean_net.variables.values())
                 self.var_variable = list(self.var_net.variables.values())
-            with tf.variable_scope("gradient"):
+            with tf.variable_scope("gradient", reuse=None):
                 self.grad_mod1,self.grad_mod2 = gradient_modify(self.mean, self.var,
                                                                 self.y, self.sample_size)
 

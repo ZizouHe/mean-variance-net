@@ -78,17 +78,17 @@ class alpha_beta_net():
         alpha_net: mean network
         beta_net: var network
         """
-        with tf.variable_scope('input'):
+        with tf.variable_scope('input', reuse=None):
             self.x = tf.placeholder(tf.float32, shape=[None, self.n_input],name='x')
             self.y = tf.placeholder(tf.float32, shape=[None, self.n_classes],name='y')
 
-        with tf.variable_scope('hyperparameter'):
+        with tf.variable_scope('hyperparameter', reuse=None):
             self.keep_prob = tf.placeholder(tf.float32, name='dropout')
             tf.summary.scalar('dropout_keep_probability', self.keep_prob)
             self.learning_rate = tf.placeholder(tf.float32, name='learning_rate')
             tf.summary.scalar('learning_rate', self.learning_rate)
 
-        with tf.variable_scope('alpha_net'):
+        with tf.variable_scope('alpha_net', reuse=None):
             self.alpha_net = conv_net('alpha_net')
             # construct alpha network use truncated-normal initializer
             self.alpha_net.network(x=self.x, n_input=self.n_input,
@@ -96,11 +96,11 @@ class alpha_beta_net():
                                    strides=strides[:4], initializer="truncated")
             self.alpha_net.out = tf.nn.relu(self.alpha_net.out)
 
-            with tf.variable_scope('output'):
+            with tf.variable_scope('output', reuse=None):
                 #self.alpha_net.out = tf.sigmoid(self.alpha_net.out)
                 variable_summaries(self.alpha_net.out, 'values')
 
-        with tf.variable_scope('beta_net'):
+        with tf.variable_scope('beta_net', reuse=None):
             self.beta_net = conv_net('beta_net')
             # construct alpha network use truncated-normal initializer
             self.beta_net.network(x=self.x, n_input=self.n_input,
@@ -108,7 +108,7 @@ class alpha_beta_net():
                                    strides=strides[4:], initializer="truncated")
             self.beta_net.out = tf.nn.relu(self.beta_net.out)
 
-            with tf.variable_scope('output'):
+            with tf.variable_scope('output', reuse=None):
                 #self.beta_net.out = tf.sigmoid(self.beta_net.out)
                 variable_summaries(self.beta_net.out, 'values')
 
@@ -123,16 +123,16 @@ class alpha_beta_net():
         cost: cost function on training set
         validation_cost: cost function value on validation set
         """
-        with tf.variable_scope('accuracy'):
-            with tf.variable_scope('correct_prediction'):
+        with tf.variable_scope('accuracy', reuse=None):
+            with tf.variable_scope('correct_prediction', reuse=None):
                 correct_pred = tf.equal(tf.argmax(tf.concat([self.alpha_net.out,
                                                              self.beta_net.out],1),1),
                                         tf.argmax(self.y,1))
-            with tf.variable_scope('accuracy'):
+            with tf.variable_scope('accuracy', reuse=None):
                 self.accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
             tf.summary.scalar('accuracy', self.accuracy)
 
-        with tf.variable_scope('cost'):
+        with tf.variable_scope('cost', reuse=None):
             self.cost = cost_func(self.alpha_net.out,self.beta_net.out,self.y)
             self.validation_cost = cost_func(self.alpha_net.out,self.beta_net.out,self.y)
         tf.summary.scalar('train_cost', self.cost)

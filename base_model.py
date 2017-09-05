@@ -165,14 +165,14 @@ class conv_net():
         # Calculate mean and variance in case of truncated_normal initialization
         var = 0.02/sqrt(np.prod(np.array(input_dim)))
         mean = var*2 + 1e-6
-        with tf.variable_scope(layer_name):
-            with tf.variable_scope("weight"):
+        with tf.variable_scope(layer_name, reuse=None):
+            with tf.variable_scope("weight", reuse=None):
                 self.variables[layer_name+'_w'] = initial_variable(name= 'weight',shape=input_dim+output_dim,
                                                                    dtype=tf.float32, initializer=initializer,
                                                                    mean=mean, var=var)
 
 
-            with tf.variable_scope("bias"):
+            with tf.variable_scope("bias", reuse=None):
                 self.variables[layer_name+'_b'] = initial_variable(name= 'bias',shape=output_dim, dtype=tf.float32,
                                                                    initializer="constant", mean=mean)
         # Record variable summaries
@@ -220,21 +220,21 @@ class conv_net():
         self.__set_variable__(strides=strides, initializer=initializer)
 
         x = tf.reshape(x, shape=[-1, int(np.sqrt(n_input)), int(np.sqrt(n_input)), 1])
-        with tf.variable_scope('conv1'):
+        with tf.variable_scope('conv1', reuse=None):
             # Convolution Layer
             conv1 = conv2d(x, self.variables["conv1_w"], self.variables["conv1_b"], strides = strides[0])
             tf.summary.histogram(self.name+"/conv1/conv_output", conv1)
             # Max Pooling (down-sampling)
             conv1 = maxpool2d(conv1, k=strides[1])
             tf.summary.histogram(self.name+"/conv1/maxpool_output", conv1)
-        with tf.variable_scope('conv2'):
+        with tf.variable_scope('conv2', reuse=None):
             # Convolution Layer
             conv2 = conv2d(conv1, self.variables["conv2_w"], self.variables["conv2_b"], strides = strides[2])
             tf.summary.histogram(self.name+"/conv2/conv_output", conv2)
             # Max Pooling (down-sampling)
             conv2 = maxpool2d(conv2, k=strides[3])
             tf.summary.histogram(self.name+"/conv2/maxpool_output", conv2)
-        with tf.variable_scope('fcon1'):
+        with tf.variable_scope('fcon1', reuse=None):
             # Fully connected layer
             # Reshape conv2 output to fit fully connected layer input
             fc1 = tf.reshape(conv2, [-1, self.variables["fcon1_w"].get_shape().as_list()[0]])
@@ -244,7 +244,7 @@ class conv_net():
             # Apply Dropout
             fc1 = tf.nn.dropout(fc1, dropout)
             tf.summary.histogram(self.name+"/fcon1/dropout_output", fc1)
-        with tf.variable_scope('output'):
+        with tf.variable_scope('output', reuse=None):
             # Output
             self.out = tf.add(tf.matmul(fc1, self.variables["output_w"]), self.variables["output_b"])
             tf.summary.histogram(self.name+"/output/preact_output", self.out)
