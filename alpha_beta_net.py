@@ -12,6 +12,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
 
+
 def cost_func(alpha, beta, y):
     """
     Cost function for alpha-beta net.

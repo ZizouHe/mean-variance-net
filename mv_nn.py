@@ -8,7 +8,6 @@ Created on Sun Aug 27 19:27:03 2017
 Construct mean-variance net
 """
 
-from mnist import MNIST
 import numpy as np
 import scipy
 import tensorflow as tf
