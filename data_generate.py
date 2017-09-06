@@ -107,7 +107,7 @@ class generation_net():
         # if finish in the epoch
         if self._index_in_epoch > self._num_examples:
             #shuffle the data
-            perm = np.arrange(self._num_examples)
+            perm = np.arange(self._num_examples)
             np.random.shuffle(perm)
             self.data.train._images = self.data.train._images[perm]
             self.data.train._labels = self.data.train._labels[perm]
@@ -282,7 +282,7 @@ class data_set():
         # if finish in the epoch
         if self._index_in_epoch > self._num_examples:
             #shuffle the data
-            perm = np.arrange(self._num_examples)
+            perm = np.arange(self._num_examples)
             np.random.shuffle(perm)
             self.data.train._images = self.data.train._images[perm]
             self.data.train._labels = self.data.train._labels[perm]
