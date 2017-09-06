@@ -228,16 +228,15 @@ def data_generation(pred, X, y, sample_size=2):
     print("Total data size: {0}, correct labeled data size: {1}".format(correct_pred.shape[0],
                                                                         np.sum(correct_pred)))
     X = X[correct_pred, :]
-    pred = pred[correct_pred, :]
     # softmax with soften operation
-    dist = np.exp(pred/4) / np.sum(np.exp(pred/4),axis=1)[:, None]
+    pred = pred[correct_pred, :]/4
     # generate random normal noise
-    rand = np.random.normal(loc=0, scale=0.03*np.eye(dist.shape[1]-1),
-                            size=(dist.shape[0],dist.shape[1]-1))
+    rand = np.random.normal(loc=np.repeat(0,y.shape[1]),
+                            scale=np.append(np.repeat(0.5,y.shape[1]-1), 0),
+                            size=(X.shape[0],y.shape[1]))
     # add noise to data
-    dist = dist[:, :dist.shape[1]-1] + rand
-    dist = np.concatenate((dist, 1 - np.sum(dist, axis=1)[:,None]), axis=1)
-    dist = np.clip(dist, 0.02, 0.98)
+    pred += rand
+    dist = np.exp(pred) / np.sum(np.exp(pred),axis=1)[:, None]
     # define sample methods
     f = lambda x: np.random.choice(range(dist.shape[1]),size=sample_size, p=x)
     labels = np.apply_along_axis(f, 1, dist)
@@ -330,15 +329,18 @@ class simulate_data():
         self.test: test data
         self.validation: validation data
         """
+        # read from given data
         if (X is not None) and (y is not None):
             X = X
             y = y
+        # read from data file
         elif (image_file is not None) and (label_file is not None):
-            X = np.load(path + "/" + image_file)
-            y = np.load(path + "/" + label_file)
+            X = self.__from_file__(image_file, path)
+            y = self.__from_file__(label_file, path)
             print("Read data finished...")
         else:
             raise ValueError("enter valid data!")
+
         self.n_classes = y.shape[1]
         # randomly shuffle the data
         perm = np.arange(X.shape[0])
@@ -351,12 +353,28 @@ class simulate_data():
         self.validation = data_set(X = X[validation,:], y = y[validation, :])
         print("Split data finished...")
 
+    def __from_file__(self, file_name, path="."):
+        """read from file"""
+        # read from .npy file
+        if file_name[-3:] == 'npy':
+            return np.load(path + "/" + file_name)
+        # read from .npz file
+        elif file_name[-3:] == 'npz':
+            data = np.load(path + "/" + image_file)
+            keys = data.keys()
+            if len(keys) > 1:
+                raise ValueError("more than one data source in image file")
+            return data[keys[0]]
+        else:
+            raise ValueError("invalid file type: "+file_name)
+
+
     def to_file(self, name, path="."):
         """save to file"""
         X = np.concatenate((self.train.images, self.test.images, self.validation.images), axis=0)
         y = np.concatenate((self.train.labels, self.test.labels, self.validation.labels), axis=0)
-        np.save(path+"/"+name+"_images.npy", X)
-        np.save(path+"/"+name+"_labels.npy", y)
+        np.savez_compressed(path+"/"+name+"_images", X=X)
+        np.savez_compressed(path+"/"+name+"_labels", y=y)
         print("Data saved...")
 
 def main():
@@ -365,7 +383,7 @@ def main():
     mnist = data_munipulate()
     # construct and train DNN
     gdnet = generation_net(data = mnist)
-    gdnet.train_net(training_iters=50000,learning_rate=0.001,
+    gdnet.train_net(training_iters=200000,learning_rate=0.001,
                     batch_size=128, display_step=100, dropout=1)
     # sample new labels
     X,y = data_generation(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
