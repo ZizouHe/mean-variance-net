@@ -150,6 +150,7 @@ class generation_net():
 
         # Launch the graph
         with tf.Session() as sess:
+            print("Training start...")
             sess.run(init)
             step = 1
             # Record train data
@@ -180,7 +181,7 @@ class generation_net():
 
                 step += 1
 
-            print("Optimization finished")
+            print("Optimization finished...")
             # Calculate test loss
             self.pred, loss, acc = sess.run([self.net.out, self.cost,self.accuracy],
                                              feed_dict={self.x: self.data.train.images,
@@ -203,9 +204,10 @@ def data_munipulate():
     mnist.train._labels = np.concatenate((mnist.train.labels,
                                           mnist.test.labels,
                                           mnist.validation.labels), axis=0)
+    print("Data munipulation finished...")
     return mnist
 
-def data_generation(pred, sample_size=2):
+def data_generation(pred, X, y, sample_size=2):
     """
     Data generation function. Generate more than 1 labels for each input
 
@@ -217,9 +219,16 @@ def data_generation(pred, sample_size=2):
 
     Return
     ------
-    numpy matrix/array with size [data_size, sample_size]
-    each element is a label without one-hot operation
+    1: input data, numpy matrix with size [data_size*sample_size, input_size]
+    2: labels, numpy array/matrix with size [data_size*sample_size, class_size]
+       each row is a label with one-hot representation
     """
+    # drop wrong labeled data
+    correct_pred = np.equal(np.argmax(pred,1),np.argmax(y,1))
+    print("Total data size: {0}, correct labeled data size: {1}".format(correct_pred.shape[0],
+                                                                        np.sum(correct_pred)))
+    X = X[correct_pred, :]
+    pred = pred[correct_pred, :]
     # softmax with soften operation
     dist = np.exp(pred/4) / np.sum(np.exp(pred/4),axis=1)[:, None]
     # generate random normal noise
@@ -231,8 +240,124 @@ def data_generation(pred, sample_size=2):
     dist = np.clip(dist, 0.02, 0.98)
     # define sample methods
     f = lambda x: np.random.choice(range(dist.shape[1]),size=sample_size, p=x)
-    return np.apply_along_axis(f, 1, dist)
+    labels = np.apply_along_axis(f, 1, dist)
+    print("Data Generation finished...")
+    # return new input and labels
+    return np.repeat(X, sample_size, axis=0), \
+           np.eye(pred.shape[1])[np.reshape(labels, (np.prod(pred.shape),), order="F")]
 
+class data_set():
+    """data set"""
+    def __init__(self, X, y):
+        """
+        initialized method, set write authority = False for labels
+
+        Parameters
+        ----------
+        X: numpy matrix with size [data_size, input_size]
+        y: numpy matrix(one-hot) or array with size [data_size, ?]
+        """
+        # check sample size
+        if (X.shape[0] != y.shape[0]):
+            raise ValueError("X and y should have same sample size!")
+        self._images = X
+        self._labels = y
+        self._labels.setflags(write=0)
+        self._index_in_epoch = 0
+        self._num_examples = X.shape[0]
+
+    def next_batch(self, batch_size):
+        """
+        mini-batch method for training
+
+        Parameters
+        ----------
+        batch_size: batch size
+
+        Returns
+        --------
+        the next batch_size examples from this data set.
+        """
+        start = self._index_in_epoch
+        self._index_in_epoch += batch_size
+        # if finish in the epoch
+        if self._index_in_epoch > self._num_examples:
+            #shuffle the data
+            perm = np.arrange(self._num_examples)
+            np.random.shuffle(perm)
+            self.data.train._images = self.data.train._images[perm]
+            self.data.train._labels = self.data.train._labels[perm]
+            start = 0
+            self._index_in_epoch = batch_size
+            # check for batch_size scale
+            assert batch_size <= self._num_examples
+
+        end = self._index_in_epoch
+        return self.data.train.images[start:end], self.data.train.labels[start:end]
+
+    @property
+    def images(self):
+        """read-only image attribute"""
+        return self._images
+
+    @property
+    def labels(self):
+        """read-only label attribute"""
+        return self._labels
+
+
+class simulate_data():
+    """simulate data"""
+    def __init__(self, X=None, y=None, path=".", image_file=None, label_file=None):
+        """
+        initialize method, divide data into 3 parts: train, test, validation
+
+        Warning: Currently, we just shuffle the data, maybe it is necessary to
+                 place data with same input in the same set.
+
+        Parameters
+        ----------
+        X: input data, e.g. images
+        y: input labels
+        path: string, file path, if read from file
+        image_file: string, image file name
+        label_file: string, label file name
+
+        Attributes
+        ----------
+        self.n_classes: class number
+        self.train: training data
+        self.test: test data
+        self.validation: validation data
+        """
+        if (X is not None) and (y is not None):
+            X = X
+            y = y
+        elif (image_file is not None) and (label_file is not None):
+            X = np.load(path + "/" + image_file)
+            y = np.load(path + "/" + label_file)
+            print("Read data finished...")
+        else:
+            raise ValueError("enter valid data!")
+        self.n_classes = y.shape[1]
+        # randomly shuffle the data
+        perm = np.arange(X.shape[0])
+        np.random.shuffle(perm)
+        train = perm[:int(len(perm)*0.79)]
+        test = perm[int(len(perm)*0.79):int(len(perm)*0.93)]
+        validation = perm[int(len(perm)*0.93):]
+        self.train = data_set(X = X[train,:], y = y[train, :])
+        self.test = data_set(X = X[test,:], y = y[test, :])
+        self.validation = data_set(X = X[validation,:], y = y[validation, :])
+        print("Split data finished...")
+
+    def to_file(self, name, path="."):
+        """save to file"""
+        X = np.concatenate((self.train.images, self.test.images, self.validation.images), axis=0)
+        y = np.concatenate((self.train.labels, self.test.labels, self.validation.labels), axis=0)
+        np.save(path+"/"+name+"_images.npy", X)
+        np.save(path+"/"+name+"_labels.npy", y)
+        print("Data saved...")
 
 def main():
     """main function"""
@@ -242,13 +367,12 @@ def main():
     gdnet = generation_net(data = mnist)
     gdnet.train_net(training_iters=50000,learning_rate=0.001,
                     batch_size=128, display_step=100, dropout=1)
-    # record training data, drop wrong labeled data
-    y = gdnet.data.train.labels.copy()
-    correct_pred = np.equal(np.argmax(pred,1),np.argmax(y,1))
-    X = gdnet.data.train.images.copy()[correct_pred,:]
-    pred = gdnet.pred.copy()[correct_pred,:]
     # sample new labels
-    pred = data_generation(pred=gdnet.pred.copy(), sample_size=2)
+    X,y = data_generation(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
+                           y=gdnet.data.train.labels.copy(), sample_size=2)
+    data = simulate_data(X=X, y=y)
+    data.to_file(name="simulation",path="./simulation_data")
+
     return gdnet
 
 if __name__ == '__main__':
