@@ -11,6 +11,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
 from base_model import conv_net, variable_summaries, mnist_modify
+import copy
 
 class generation_net():
     """standard convnet for data generating"""
@@ -26,7 +27,7 @@ class generation_net():
         n_classes: total classes number(e.g. 0-9 digits; 0/1 labels)
         _index_in_epoch: index for next_train_batch method
         """
-        self.data = data
+        self.data = copy.deepcopy(data)
         self.n_input = n_input
         self.n_classes = n_classes
         self._index_in_epoch = 0
@@ -259,8 +260,8 @@ class data_set():
         # check sample size
         if (X.shape[0] != y.shape[0]):
             raise ValueError("X and y should have same sample size!")
-        self._images = X
-        self._labels = y
+        self._images = X.copy()
+        self._labels = y.copy()
         self._labels.setflags(write=0)
         self._index_in_epoch = 0
         self._num_examples = X.shape[0]
