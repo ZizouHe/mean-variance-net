@@ -244,7 +244,7 @@ def data_generation(pred, X, y, sample_size=2):
     print("Data Generation finished...")
     # return new input and labels
     return np.repeat(X, sample_size, axis=0), \
-           np.eye(pred.shape[1])[np.reshape(labels, (np.prod(pred.shape),), order="F")]
+           np.eye(pred.shape[1])[np.reshape(labels, (np.prod(labels.shape),), order="F")]
 
 class data_set():
     """data set"""
@@ -342,7 +342,7 @@ class group_data_set(data_set):
         self._group_size = group_size
         # check if data size match group size
         assert X.shape[0] % group_size == 0
-        self._num_examples = X.shape[0] / group_size
+        self._num_examples = X.shape[0] // group_size
 
     def next_batch(self, batch_size):
         """
@@ -361,7 +361,7 @@ class group_data_set(data_set):
             raise ValueError("please enter batch_size that can divide group_size: {}".\
                 format(self._group_size))
         start = self._index_in_epoch
-        self._index_in_epoch += batch_size / self._group_size
+        self._index_in_epoch += batch_size // self._group_size
         if self._index_in_epoch > self._num_examples:
             perm = np.arange(self._num_examples)
             np.random.shuffle(perm)
@@ -379,9 +379,9 @@ class group_data_set(data_set):
             self._labels = self._labels.reshape(( \
                 self._num_examples*self._group_size,self._n_classes))
             start = 0
-            self._index_in_epoch = batch_size / self._group_size
+            self._index_in_epoch = batch_size // self._group_size
             # check for batch_size scale
-            assert batch_size / self._group_size <= self._num_examples
+            assert batch_size // self._group_size <= self._num_examples
 
         end = self._index_in_epoch
         return self.images[start:end], self.labels[start:end]
@@ -477,23 +477,23 @@ class group_simulate_data(simulate_data):
             raise ValueError("enter valid data!")
         self._n_classes = y.shape[1]
         # randomly shuffle the data
-        perm = np.arange(X.shape[0] / group_size)
+        perm = np.arange(X.shape[0] // group_size)
         np.random.shuffle(perm)
         # determine split ratio
         train = perm[:int(len(perm)*0.79)]
         test = perm[int(len(perm)*0.79):int(len(perm)*0.93)]
         validation = perm[int(len(perm)*0.93):]
         #reshape for data split
-        X_re = X.reshape((X.shape[0] / group_size, group_size*X.shape[1]))
-        y_re = y.reshape((y.shape[0] / group_size, group_size*y.shape[1]))
-        def reshape(perm):
+        X_re = X.reshape((X.shape[0] // group_size, group_size*X.shape[1]))
+        y_re = y.reshape((y.shape[0] // group_size, group_size*y.shape[1]))
+        def reshape(perm, X, X_re, y, y_re):
             """reshape and perm for data"""
             X = X_re[perm,:].reshape((len(perm)*self._group_size, X.shape[1]))
             y = y_re[perm, :].reshape((len(perm)*self._group_size, y.shape[1]))
             return X,y
-        X_train, y_train = reshape(train)
-        X_test, y_test = reshape(test)
-        X_validation, y_validation = reshape(validation)
+        X_train, y_train = reshape(train, X, X_re, y, y_re)
+        X_test, y_test = reshape(test, X, X_re, y, y_re)
+        X_validation, y_validation = reshape(validation, X, X_re, y, y_re)
         self.train = group_data_set(X_train,y_train,self._group_size)
         self.test = group_data_set(X_test,y_test,self._group_size)
         self.validation = group_data_set(X_validation,y_validation,self._group_size)
@@ -510,9 +510,13 @@ def main():
                     batch_size=128, display_step=100, dropout=1)
     # sample new labels
     X,y = data_generation(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
-                           y=gdnet.data.train.labels.copy(), sample_size=2)
-    data = simulate_data(X=X, y=y)
-    data.to_file(name="simulation",path="./simulation_data")
+                           y=gdnet.data.train.labels.copy(), sample_size=4)
+    # for group data
+    data = group_simulate_data(group_size=4, X=X, y=y)
+    data.to_file(name="group_simulation", path="./simulation_data")
+    # for non-group data
+    #data = simulate_data(X=X, y=y)
+    #data.to_file(name="simulation",path="./simulation_data")
 
     return gdnet
 
