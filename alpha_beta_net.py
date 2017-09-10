@@ -94,7 +94,7 @@ class alpha_beta_net():
             self.alpha_net.network(x=self.x, n_input=self.n_input,
                                    n_output=self.n_classes-1, dropout=self.keep_prob,
                                    strides=strides[:4], initializer="truncated")
-            self.alpha_net.out = tf.nn.relu(self.alpha_net.out)
+            self.alpha_net.out = tf.nn.elu(self.alpha_net.out)+1
 
             with tf.variable_scope('output', reuse=None):
                 #self.alpha_net.out = tf.sigmoid(self.alpha_net.out)
@@ -106,7 +106,7 @@ class alpha_beta_net():
             self.beta_net.network(x=self.x, n_input=self.n_input,
                                    n_output=self.n_classes-1, dropout=self.keep_prob,
                                    strides=strides[4:], initializer="truncated")
-            self.beta_net.out = tf.nn.relu(self.beta_net.out)
+            self.beta_net.out = tf.nn.elu(self.beta_net.out)+1
 
             with tf.variable_scope('output', reuse=None):
                 #self.beta_net.out = tf.sigmoid(self.beta_net.out)
@@ -185,8 +185,9 @@ class alpha_beta_net():
                                                   sess.graph)
 
             # Keep training until reach max iterations
+            batch_x, batch_y = self.data.train.next_batch(batch_size)
             while step * batch_size <= training_iters:
-                batch_x, batch_y = self.data.train.next_batch(batch_size)
+
                 # Run optimization op (backprop)
                 summary, _ = sess.run([merged, self.optimizer],
                                        feed_dict={self.x: batch_x,
@@ -223,5 +224,5 @@ if __name__ == '__main__':
     mnist_modify(mnist, {0:range(0,5), 1:range(5,10)}, one_hot=True)
     # Construct and train network
     abnn = alpha_beta_net(data = mnist)
-    abnn.train_net(training_iters=20000, learning_rate=0.001,
+    abnn.train_net(training_iters=40000, learning_rate=0.001,
                    batch_size=128, display_step=1)

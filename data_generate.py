@@ -256,6 +256,15 @@ class data_set():
         ----------
         X: numpy matrix with size [data_size, input_size]
         y: numpy matrix(one-hot) or array with size [data_size, ?]
+
+        Attributes
+        ----------
+        _images: data input
+        _labels: class label, one_hot or not
+        _index_in_epoch: index for next_train_batch method
+        _num_examples: number of data
+        _n_input: data input size(e.g. img shape: 28*28 = 784)
+        _n_classes: total classes number(e.g. 0-9 digits; 0/1 labels)
         """
         # check sample size
         if (X.shape[0] != y.shape[0]):
@@ -265,6 +274,8 @@ class data_set():
         self._labels.setflags(write=0)
         self._index_in_epoch = 0
         self._num_examples = X.shape[0]
+        self._n_classes = y.shape[1]
+        self._n_input = X.shape[1]
 
     def next_batch(self, batch_size):
         """
@@ -285,15 +296,15 @@ class data_set():
             #shuffle the data
             perm = np.arange(self._num_examples)
             np.random.shuffle(perm)
-            self.data.train._images = self.data.train._images[perm]
-            self.data.train._labels = self.data.train._labels[perm]
+            self._images = self._images[perm]
+            self._labels = self._labels[perm]
             start = 0
             self._index_in_epoch = batch_size
             # check for batch_size scale
             assert batch_size <= self._num_examples
 
         end = self._index_in_epoch
-        return self.data.train.images[start:end], self.data.train.labels[start:end]
+        return self.images[start:end], self.labels[start:end]
 
     @property
     def images(self):
@@ -305,6 +316,75 @@ class data_set():
         """read-only label attribute"""
         return self._labels
 
+class group_data_set(data_set):
+    """
+    data set with more than one label for each input
+    e.g. crowdsourcing data
+    In this kind of dataset,
+    we need give back batch with all data with same input
+    """
+    def __init__(self, X, y, group_size):
+        """
+        Initialization methods
+
+        Parameters
+        ----------
+        X: numpy matrix with size [data_size, input_size]
+        y: numpy matrix(one-hot) or array with size [data_size, ?]
+        group_size: number of examples with same input values
+
+        Attributes
+        ----------
+        _group_size: group_size
+        _num_examples: number of data with different input values
+        """
+        super().__init__(X, y)
+        self._group_size = group_size
+        # check if data size match group size
+        assert X.shape[0] % group_size == 0
+        self._num_examples = X.shape[0] / group_size
+
+    def next_batch(self, batch_size):
+        """
+        batch method specifically for this kind of dataset
+
+        Parameters
+        ----------
+        batch_size: batch size
+
+        Returns
+        --------
+        the next batch_size / group_size examples from this data set.
+        """
+        # check if batch size match group size
+        if batch_size % self._group_size != 0:
+            raise ValueError("please enter batch_size that can divide group_size: {}".\
+                format(self._group_size))
+        start = self._index_in_epoch
+        self._index_in_epoch += batch_size / self._group_size
+        if self._index_in_epoch > self._num_examples:
+            perm = np.arange(self._num_examples)
+            np.random.shuffle(perm)
+            # reshape for shuffle
+            self._images = self._images.reshape(( \
+                self._num_examples, self._group_size*self._n_input))
+            self._labels = self._labels.reshape(( \
+                self._num_examples,self._group_size*self._n_classes))
+            # shuffle
+            self._images = self._images[perm, :]
+            self._labels = self._labels[perm, :]
+            # reshape back
+            self._images = self._images.reshape(( \
+                self._num_examples*self._group_size,self._n_input))
+            self._labels = self._labels.reshape(( \
+                self._num_examples*self._group_size,self._n_classes))
+            start = 0
+            self._index_in_epoch = batch_size / self._group_size
+            # check for batch_size scale
+            assert batch_size / self._group_size <= self._num_examples
+
+        end = self._index_in_epoch
+        return self.images[start:end], self.labels[start:end]
 
 class simulate_data():
     """simulate data"""
@@ -336,16 +416,17 @@ class simulate_data():
             y = y
         # read from data file
         elif (image_file is not None) and (label_file is not None):
-            X = self.__from_file__(image_file, path)
-            y = self.__from_file__(label_file, path)
+            X = self.__from_file__(file_name=image_file, path=path)
+            y = self.__from_file__(file_name=label_file, path=path)
             print("Read data finished...")
         else:
             raise ValueError("enter valid data!")
 
-        self.n_classes = y.shape[1]
+        self._n_classes = y.shape[1]
         # randomly shuffle the data
         perm = np.arange(X.shape[0])
         np.random.shuffle(perm)
+        # determine split ratio
         train = perm[:int(len(perm)*0.79)]
         test = perm[int(len(perm)*0.79):int(len(perm)*0.93)]
         validation = perm[int(len(perm)*0.93):]
@@ -361,7 +442,7 @@ class simulate_data():
             return np.load(path + "/" + file_name)
         # read from .npz file
         elif file_name[-3:] == 'npz':
-            data = np.load(path + "/" + image_file)
+            data = np.load(path + "/" + file_name)
             keys = data.keys()
             if len(keys) > 1:
                 raise ValueError("more than one data source in image file")
@@ -377,6 +458,47 @@ class simulate_data():
         np.savez_compressed(path+"/"+name+"_images", X=X)
         np.savez_compressed(path+"/"+name+"_labels", y=y)
         print("Data saved...")
+
+class group_simulate_data(simulate_data):
+    """simulate dataset with more than one label for each input"""
+    def __init__(self, group_size, X=None, y=None, path=".", image_file=None, label_file=None):
+        """Initialization method"""
+        self._group_size = group_size
+        # read from given data
+        if (X is not None) and (y is not None):
+            X = X
+            y = y
+        # read from data file
+        elif (image_file is not None) and (label_file is not None):
+            X = self.__from_file__(file_name=image_file, path=path)
+            y = self.__from_file__(file_name=label_file, path=path)
+            print("Read data finished...")
+        else:
+            raise ValueError("enter valid data!")
+        self._n_classes = y.shape[1]
+        # randomly shuffle the data
+        perm = np.arange(X.shape[0] / group_size)
+        np.random.shuffle(perm)
+        # determine split ratio
+        train = perm[:int(len(perm)*0.79)]
+        test = perm[int(len(perm)*0.79):int(len(perm)*0.93)]
+        validation = perm[int(len(perm)*0.93):]
+        #reshape for data split
+        X_re = X.reshape((X.shape[0] / group_size, group_size*X.shape[1]))
+        y_re = y.reshape((y.shape[0] / group_size, group_size*y.shape[1]))
+        def reshape(perm):
+            """reshape and perm for data"""
+            X = X_re[perm,:].reshape((len(perm)*self._group_size, X.shape[1]))
+            y = y_re[perm, :].reshape((len(perm)*self._group_size, y.shape[1]))
+            return X,y
+        X_train, y_train = reshape(train)
+        X_test, y_test = reshape(test)
+        X_validation, y_validation = reshape(validation)
+        self.train = group_data_set(X_train,y_train,self._group_size)
+        self.test = group_data_set(X_test,y_test,self._group_size)
+        self.validation = group_data_set(X_validation,y_validation,self._group_size)
+        print("Split data finished...")
+
 
 def main():
     """main function"""
