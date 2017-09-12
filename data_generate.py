@@ -388,7 +388,7 @@ class group_data_set(data_set):
 
 class simulate_data():
     """simulate data"""
-    def __init__(self, X=None, y=None, path=".", image_file=None, label_file=None):
+    def __init__(self, shuffle=True, X=None, y=None, path=".", image_file=None, label_file=None):
         """
         initialize method, divide data into 3 parts: train, test, validation
 
@@ -423,9 +423,10 @@ class simulate_data():
             raise ValueError("enter valid data!")
 
         self._n_classes = y.shape[1]
-        # randomly shuffle the data
         perm = np.arange(X.shape[0])
-        np.random.shuffle(perm)
+        # randomly shuffle the data
+        if shuffle:
+            np.random.shuffle(perm)
         # determine split ratio
         train = perm[:int(len(perm)*0.79)]
         test = perm[int(len(perm)*0.79):int(len(perm)*0.93)]

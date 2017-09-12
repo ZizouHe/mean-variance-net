@@ -182,13 +182,13 @@ class conv_net():
     def __set_variable__(self, initializer, strides=[1,2,1,2]):
         """Set up network's variables"""
 
-        full_size = int(self.n_input/(strides[1]**2)/(strides[3]**2))
+        full_size = int(self.input_shape[0]*self.input_shape[1]/(strides[1]**2)/(strides[3]**2))
         self.nn_layer([5,5,1], [32], "conv1", initializer)
         self.nn_layer([5,5,32], [64], "conv2", initializer)
         self.nn_layer([full_size*64], [1024], "fcon1", initializer)
         self.nn_layer([1024], [self.n_output], "output", initializer)
 
-    def network(self, x, n_input, n_output, dropout, strides, initializer="he"):
+    def network(self, x, n_input, n_output, dropout, strides, input_shape=[28,28,1],initializer="he"):
         """
         Construct Convolution network.
 
@@ -203,6 +203,7 @@ class conv_net():
             2. max_pool layer 1 ksize and strides size
             3. conv layer 2 stride size
             4. max_pool layer 2 ksize and strides size
+        input_shape: indicate shape for structured image
         initializer: initialization methods
 
         Attributes
@@ -210,6 +211,7 @@ class conv_net():
         n_input: input size
         n_output: output size
         out: output tensor
+        input_shape: input shape
 
         Returns
         -------
@@ -217,9 +219,10 @@ class conv_net():
         """
         self.n_input = n_input
         self.n_output = n_output
+        self.input_shape = input_shape
         self.__set_variable__(strides=strides, initializer=initializer)
 
-        x = tf.reshape(x, shape=[-1, int(np.sqrt(n_input)), int(np.sqrt(n_input)), 1])
+        x = tf.reshape(x, shape=[-1]+input_shape)
         with tf.variable_scope('conv1', reuse=None):
             # Convolution Layer
             conv1 = conv2d(x, self.variables["conv1_w"], self.variables["conv1_b"], strides = strides[0])
