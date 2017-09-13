@@ -11,7 +11,7 @@ import numpy as np
 from math import sqrt
 from base_model import variable_summaries
 import copy
-from cifar10_data import get_cifar
+from cifar10_data import get_cifar, get_cifar_url
 from data_generate import simulate_data
 import time
 
@@ -19,9 +19,11 @@ IMAGE_SIZE = 24
 NUM_CLASSES = 10
 INPUT_SIZE = 3072
 INITIAL_LEARNING_RATE = 0.01
-TRAINING_ITERS = 6000
-DISPLAY_STEP = 20
+TRAINING_ITERS = 2000
+DISPLAY_STEP = 5
 BATCH_SIZE = 128
+TEST_BATCH = 2000
+TOTAL_NUM = 60000
 
 def conv2d(x, W, b, strides=1):
     """
@@ -503,10 +505,31 @@ class generation_net():
             #self.pred, loss, acc = sess.run([self.net.logits, self.cost, self.accuracy],
             #                                 feed_dict={self.x: self.data.train.images,
             #                                            self.y: self.data.train.labels})
-            self.pred, loss, acc = sess.run([self.net.logits, self.cost, self.accuracy],
-                                             feed_dict={self.x: batch_x,
-                                                        self.y: batch_y})
-            print("Train Loss= {:.4f}".format(loss) +", Train Accuracy= {:.4f}".format(acc))
+            #self.pred, loss, acc = sess.run([self.net.logits, self.cost, self.accuracy],
+            #                                 feed_dict={self.x: batch_x,
+            #                                           self.y: batch_y})
+
+            print("start testing...")
+            step = 0
+            self.pred, loss, accu = [],[],[]
+            while step*TEST_BATCH < TOTAL_NUM:
+                batch_x = self.data.train.images[step*TEST_BATCH:(step+1)*TEST_BATCH, :]
+                batch_y = self.data.train.labels[step*TEST_BATCH:(step+1)*TEST_BATCH, :]
+                a, b, c = sess.run([self.net.logits, self.cost, self.accuracy],
+                                                feed_dict={self.x: batch_x,
+                                                           self.y: batch_y})
+                self.pred.append(a)
+                loss.append(b)
+                accu.append(c)
+                print("Test sample: " + str(step*TEST_BATCH) + "~" + \
+                    str((step+1)*TEST_BATCH) + ", Loss= {:.3f}".format(b) + \
+                    ", Accuracy= {:.2f}".format(c))
+                step += 1
+            print("Test finished...")
+            print("Train Loss= {:.4f}".format(sum(loss)/len(loss)) +\
+                ", Train Accuracy= {:.4f}".format(sum(accu)/len(accu)))
+
+            self.pred = np.concatenate(self.pred, axis=0)
 
 def main():
     #url = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
@@ -517,6 +540,23 @@ def main():
     cnn = generation_net(data=data)
     del data
     cnn.train_net(strides=[1,2,1,2])
+    # check the correctness
+    correct_pred = np.equal(
+        np.argmax(cnn.pred,1),
+        np.argmax(cnn.data.train.labels,1))
+    print("Total data size: {0}, correct labeled data size: {1}".format(
+            correct_pred.shape[0],
+            np.sum(correct_pred)))
+    # save data
+    data = simulate_data(
+        X=cnn.data.train.images[correct_pred, :],
+        y=cnn.pred[correct_pred, :])
+    data.to_file("simulation_cifar_corrected")
+    data = simulate_data(
+        X=cnn.data.train.images,
+        y=cnn.pred)
+    data.to_file("simulation_cifar")
+    return cnn
 
 if __name__ == '__main__':
-    main()
+    cnn = main()
