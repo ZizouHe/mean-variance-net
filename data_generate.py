@@ -436,6 +436,20 @@ class simulate_data():
         self.validation = data_set(X = X[validation,:], y = y[validation, :])
         print("Split data finished...")
 
+    def merge_all(self):
+        """merge all to training set"""
+        self.train.labels.setflags(write=1)
+        self.train._images = np.concatenate((
+            self.train.images,
+            self.test.images,
+            self.validation.images), axis=0)
+        self.train._labels = np.concatenate((
+            self.train.labels,
+            self.test.labels,
+            self.validation.labels), axis=0)
+        print("merge all data finished.")
+
+
     def __from_file__(self, file_name, path="."):
         """read from file"""
         # read from .npy file
