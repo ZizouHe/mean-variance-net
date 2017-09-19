@@ -2,32 +2,43 @@ import numpy as np
 import tensorflow as tf
 from math import sqrt
 from data_generate import data_set,simulate_data
+import pandas as pd
+import scipy.stats as stats
 
 SAMPLE_SIZE = 2
 NUM_CLASSES = 2
-N_INPUT = 784
+N_INPUT = 400
+NAME = "new_simulation"
 # Parameters, set seed
 np.random.seed(seed=1)
-W = np.random.normal(0,0.1,size=(N_INPUT, NUM_CLASSES))
-b = np.random.normal(0,0.1,size=(NUM_CLASSES,))
+W = np.random.normal(0,1,size=(N_INPUT, NUM_CLASSES))
+b = np.random.normal(0,1,size=(NUM_CLASSES,))
 # reset seed
 np.random.seed(seed=None)
 
+def normalized(x):
+    from scipy.linalg.misc import norm
+    return x/norm(x)
+
 def generate(data_size=10000):
     # data
-    X = np.random.uniform(0,1, size=(data_size,N_INPUT))
+    X = np.random.uniform(0, 1, size=(data_size,N_INPUT))
     #noise
-    Z = np.random.normal(0,2, size=(data_size, NUM_CLASSES))
+    Z = np.random.normal(0,0.000001, size=(data_size, NUM_CLASSES))
     # calculate p
-    logits = X.dot(W)+b+Z
-    p = np.exp(logits)/np.sum(np.exp(logits), axis=1,keepdims=True)
+    logits = (X.dot(W)+b)
+    logits = np.apply_along_axis(normalized, 1, logits)
+    p = (np.exp(logits+Z))/np.sum(np.exp(logits+Z), axis=1,keepdims=True)
+    p = np.clip(p, 0.05, 0.95)
+    p = 0.7*np.ones((data_size, 1)) + np.random.uniform(-0.1, 0.1, size=(data_size, 1))
+    p = np.concatenate((p, 1-p), axis=1)
 
     # sample
     f = lambda x: np.random.choice(range(p.shape[1]),size=SAMPLE_SIZE, p=x)
     labels = np.sum(np.apply_along_axis(f, 1, p), axis=1)
     labels = np.eye(SAMPLE_SIZE+1)[labels]
 
-    return X, labels
+    return X, labels, (np.exp(logits))/np.sum(np.exp(logits), axis=1,keepdims=True)
 
 def conv_train(train_data, test_data):
     # Parameters
@@ -311,7 +322,7 @@ class conv_net():
     def __set_variable__(self, initializer, strides=[1,2,1,2]):
         """Set up network's variables"""
 
-        full_size = int(sqrt(N_INPUT)*sqrt(N_INPUT)/(strides[1]**2)/(strides[3]**2))
+        full_size = int(N_INPUT/(strides[1]**2)/(strides[3]**2))
         self.nn_layer([5,5,1], [32], "conv1", initializer)
         self.nn_layer([5,5,32], [64], "conv2", initializer)
         self.nn_layer([full_size*64], [1024], "fcon1", initializer)
@@ -359,7 +370,7 @@ class conv_net2():
         self.name = name
         self.variables = {}
 
-    def nn_layer(self, input_dim, output_dim, layer_name, initializer="xavier"):
+    def nn_layer(self, input_dim, output_dim, layer_name, initializer="he"):
         var = 0.02/sqrt(np.prod(np.array(input_dim)))
         var = 5e-2
         with tf.variable_scope(layer_name, reuse=None):
@@ -377,16 +388,16 @@ class conv_net2():
 
     def __set_variable__(self, initializer):
         """Set up network's variables"""
-        self.nn_layer([N_INPUT], [1024], "fcon1", initializer)
-        self.nn_layer([1024], [1024], "fcon2", initializer)
-        self.nn_layer([1024], [NUM_CLASSES-1], "output", initializer)
+        self.nn_layer([N_INPUT], [600], "fcon1", initializer)
+        self.nn_layer([600], [600], "fcon2", initializer)
+        self.nn_layer([600], [NUM_CLASSES-1], "output", initializer)
 
-    def network(self, x, dropout, strides,initializer="xavier"):
+    def network(self, x, dropout, strides,initializer="he"):
         self.__set_variable__(initializer=initializer)
         with tf.variable_scope('fcon1', reuse=None):
             fc1 = tf.add(tf.matmul(x, self.variables["fcon1_w"]), self.variables["fcon1_b"])
             tf.summary.histogram(self.name+"/fcon1/fcon1_output", fc1)
-            fc1 = tf.nn.elu(fc1)
+            fc1 = tf.nn.relu(fc1)
             # Apply Dropout
             fc1 = tf.nn.dropout(fc1, dropout)
             tf.summary.histogram(self.name+"/fcon1/dropout_output", fc1)
@@ -394,7 +405,7 @@ class conv_net2():
         with tf.variable_scope('fcon2', reuse=None):
             fc2 = tf.add(tf.matmul(fc1, self.variables["fcon2_w"]), self.variables["fcon2_b"])
             tf.summary.histogram(self.name+"/fcon2/fcon2_output", fc2)
-            fc2 = tf.nn.elu(fc2)
+            fc2 = tf.nn.relu(fc2)
             # Apply Dropout
             fc2 = tf.nn.dropout(fc2, dropout)
             tf.summary.histogram(self.name+"/fcon2/dropout_output", fc2)
@@ -423,18 +434,18 @@ class alpha_beta_net():
             self.global_steps = tf.Variable(0,dtype=tf.int32,name='globel_steps')
 
         with tf.variable_scope('alpha_net', reuse=None):
-            self.alpha_net = conv_net('alpha_net')
+            self.alpha_net = conv_net2('alpha_net')
             # construct alpha network use truncated-normal initializer
             self.alpha_net.network(x=self.x, dropout=self.keep_prob,
                                    strides=strides[:4])
-            #self.alpha_net.out = tf.nn.elu(self.alpha_net.out)+1
+            self.alpha_net.out = tf.nn.elu(self.alpha_net.out)+1
 
             with tf.variable_scope('output', reuse=None):
                 #self.alpha_net.out = tf.sigmoid(self.alpha_net.out)
                 variable_summaries(self.alpha_net.out, 'values')
 
         with tf.variable_scope('beta_net', reuse=None):
-            self.beta_net = conv_net('beta_net')
+            self.beta_net = conv_net2('beta_net')
             # construct alpha network use truncated-normal initializer
             self.beta_net.network(x=self.x,dropout=self.keep_prob,
                                    strides=strides[4:])
@@ -446,8 +457,6 @@ class alpha_beta_net():
 
     def __define_measure__(self):
         def beta_likelihood(pred1, pred2, y):
-            pred1 = tf.nn.elu(pred1)+1
-            pred2 = tf.nn.elu(pred2)+1
             deno = tf.multiply(
                 tf.add(pred1,pred2),
                 tf.add(tf.add(pred1,pred2),1))
@@ -483,8 +492,9 @@ class alpha_beta_net():
             self.cost = -tf.reduce_mean(tf.log(true_value))
             self.virtual_cost = tf.reduce_mean(
                 tf.add(
-                    tf.pow(tf.subtract(self.alpha_net.out,2),2),
-                    tf.pow(tf.subtract(self.beta_net.out,2),2)))
+                    tf.pow(tf.subtract(self.alpha_net.out,3),2),
+                    tf.pow(tf.subtract(self.beta_net.out,3),2)))
+            #self.virtual_cost = tf.reduce_mean(tf.add(tf.subtract(self.alpha_net.out,3),tf.subtract(self.beta_net.out,3)))
             #self.validation_cost = cost_func(self.alpha_net.out,self.beta_net.out,self.y)
         tf.summary.scalar('train_cost', self.cost)
         #tf.summary.scalar('validation_cost', self.validation_cost)
@@ -493,10 +503,19 @@ class alpha_beta_net():
     def __optimization__(self, learning_rate=0.001):
         """Define optimization methods for networks."""
         with tf.variable_scope('optimization'):
-            self.optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(self.cost, global_step=self.global_steps)
+            opt = tf.train.AdamOptimizer(learning_rate=learning_rate)
+            gradient = opt.compute_gradients(self.cost)
+            self.gg = [i for i,j in gradient if i is not None]
+            gradient = [(
+                tf.multiply(
+                    tf.sign(i),
+                    tf.clip_by_value(i, 1e-4, 1e4)),
+                j)
+            for i,j in gradient if i is not None]
+            self.optimizer = opt.apply_gradients(gradient, global_step = self.global_steps)
             self.virtual_optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(self.virtual_cost)
 
-    def train_net(self, training_iters = 40000, learning_rate = 0.001, batch_size = 128,
+    def train_net(self, virtual, training_iters = 40000, learning_rate = 0.001, batch_size = 128,
                   display_step = 10, dropout = 0.75, strides = [1,2,1,2,1,2,1,2]):
         # Initializing network
         self.__construct_net__(strides=strides)
@@ -509,32 +528,35 @@ class alpha_beta_net():
         with tf.Session() as sess:
             sess.run(init)
             step = 1
-            print("virtual train start...")
-            while step * 128 <= 30000:
-                batch_x, batch_y = self.data.train.next_batch(128)
-                # Run optimization op (backprop)
-                sess.run(self.virtual_optimizer,
-                                       feed_dict={self.x: batch_x,
-                                                  self.y: batch_y,
-                                                  self.keep_prob: dropout,
-                                                  self.learning_rate: 0.003})
-                #train_writer.add_summary(summary, step)
-                # display training intermediate result
-                if step % 10 == 0:
-                    # Calculate batch loss and accuracy
-                    loss = sess.run(self.virtual_cost,
-                                          feed_dict={self.x: batch_x,
-                                                     self.y: batch_y,
-                                                     self.keep_prob: 1.})
-                    print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + \
-                          "{:.6f}".format(loss))
-                    a = input("continue?")
-                    if a != "":
-                        break
+            validation = np.array([])
+            if virtual is True:
+                print("virtual train start...")
+                while step * 128 <= 30000:
+                    batch_x, batch_y = self.data.train.next_batch(128)
+                    # Run optimization op (backprop)
+                    sess.run(self.virtual_optimizer,
+                                           feed_dict={self.x: batch_x,
+                                                      self.y: batch_y,
+                                                      self.keep_prob: dropout,
+                                                      self.learning_rate: 0.001})
+                    #train_writer.add_summary(summary, step)
+                    # display training intermediate result
+                    if step % 10 == 0:
+                        # Calculate batch loss and accuracy
+                        loss = sess.run(self.virtual_cost,
+                                              feed_dict={self.x: batch_x,
+                                                         self.y: batch_y,
+                                                         self.keep_prob: 1.})
+                        print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + \
+                              "{:.6f}".format(loss))
+                        a = input("continue?")
+                        if a != "":
+                            break
 
-                step += 1
+                    step += 1
+                print("virtual train finished...")
+
             step = 1
-            print("virtual train finished...")
             # Record train data
             # $ tensorboard --logdir=./summary_abnet
             train_writer = tf.summary.FileWriter('./tensorboard_simunet',
@@ -554,13 +576,28 @@ class alpha_beta_net():
                 # display training intermediate result
                 if step % display_step == 0:
                     # Calculate batch loss and accuracy
-                    loss, acc = sess.run([self.cost,self.accuracy],
+                    loss, acc,ggg = sess.run([self.cost,self.accuracy,self.gg],
                                           feed_dict={self.x: batch_x,
                                                      self.y: batch_y,
                                                      self.keep_prob: 1.})
                     print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + \
                           "{:.6f}".format(loss) + ", Training Accuracy= " + \
                           "{:.5f}".format(acc))
+                    #print("max gradient: {:.4f}".format(max([np.max(np.abs(i)) for i in ggg])))
+                    #print("min gradient: {:.4f}".format(min([np.min(np.abs(i)) for i in ggg])))
+                """
+                    loss = sess.run(self.cost, feed_dict = {
+                        self.x: self.data.validation.images,
+                        self.y: self.data.validation.labels,
+                        self.keep_prob: 1.})
+                    validation = np.append(validation, loss)
+
+                if step % (display_step*10) == 0:
+                    pd.Series(validation).plot()
+                    a = input("continue?")
+                    if a != "":
+                        break
+                """
 
                 step += 1
 
@@ -571,32 +608,39 @@ class alpha_beta_net():
                                              self.y: self.data.test.labels,
                                              self.keep_prob: 1.})
             print("Test Loss= {:.6f}".format(loss) +", Test Accuracy= {:.5f}".format(acc))
-            print(lkh)
+            #print(lkh)
 
             return alpha, beta
 
+def evaludate(alpha,beta,prob):
+    def variance(x,y):
+        return x*y/(x+y)**2/(x+y+1)
+    var = variance(alpha, beta)
+    prob_hat = alpha/(alpha+beta)
+    prob = np.reshape(prob[:, 0], (prob.shape[0],1))
+    dist = np.abs(prob_hat-prob[:,0])
+    left_bnd = stats.beta.cdf(0.2, alpha, beta)
+    right_bnd = stats.beta.cdf(0.8, alpha, beta)
+    a = (left_bnd < prob) & (right_bnd > prob)
+    print("{:.1f}" + "%" + " of real p falls in the 60% prediction interval".format(100*np.sum(a)/a.shape[0]))
+
 def main():
-    #train_X, train_y = generate(50000)
-    #test_X, test_y = generate(10000)
-
-    #X,y = generate(70000)
-    #data = simulate_data(X=X, y=y)
-
-    #train_data = data_set(train_X, train_y)
-    #test_data = data_set(test_X, test_y)
-    #del train_X, train_y, test_X, test_y
-    #pred = conv_train(train_data, test_data)
+    X,y,p = generate(70000)
     data = simulate_data(
         path="./simulation_data",
-        image_file="new_simulation_images.npz",
-        label_file="new_simulation_labels.npz")
+        image_file=NAME+"_images.npz",
+        label_file=NAME+"_labels.npz",
+        prob_file=NAME+"_probs.npz")
+    data = simulate_data(X=X, y=y,prob=p)
     abnet = alpha_beta_net(data)
     alpha, beta = abnet.train_net(
-        training_iters=400000,
-        learning_rate=0.01,
+        virtual = False,
+        training_iters=80000,
+        learning_rate=0.0003,
         batch_size=128,
-        display_step=20,
+        display_step=100,
         dropout=0.75)
+    evaludate(alpha, beta, abnet.data.test.probs.copy())
     """
     logits = X.dot(W)+b
     p = np.exp(logits)/np.sum(np.exp(logits), axis=1,keepdims=True)

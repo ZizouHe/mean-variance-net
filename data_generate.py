@@ -13,6 +13,9 @@ from tensorflow.examples.tutorials.mnist import input_data
 from base_model import conv_net, variable_summaries, mnist_modify
 import copy
 
+def mean(l):
+    return sum(l)/len(l)
+
 class generation_net():
     """standard convnet for data generating"""
     def __init__(self, data, n_input = 784, n_classes = 2, num_examples=70000):
@@ -184,12 +187,19 @@ class generation_net():
 
             print("Optimization finished...")
             # Calculate test loss
-            self.pred, loss, acc = sess.run([self.net.out, self.cost,self.accuracy],
-                                             feed_dict={self.x: self.data.train.images,
-                                                        self.y: self.data.train.labels,
+            self.pred = []
+            loss = []
+            acc = []
+            for i in range(0, 100):
+                pred, l, a = sess.run([self.net.out, self.cost,self.accuracy],
+                                             feed_dict={self.x: self.data.train.images[i*700:(i+1)*700,:],
+                                                        self.y: self.data.train.labels[i*700:(i+1)*700,:],
                                                         self.keep_prob: 1.})
-            print("Train Loss= {:.6f}".format(loss) +", Train Accuracy= {:.5f}".format(acc))
-
+                loss.append(l)
+                acc.append(a)
+                self.pred.append(pred)
+            self.pred = np.concatenate(self.pred, axis=0)
+            print("Train Loss= {:.6f}".format(mean(loss)) +", Train Accuracy= {:.5f}".format(mean(acc)))
 
 def data_munipulate():
     """load and munipulate for generation"""
@@ -208,7 +218,7 @@ def data_munipulate():
     print("Data munipulation finished...")
     return mnist
 
-def data_generation(pred, X, y, sample_size=2):
+def data_generation(pred, X, y, var, sample_size=2):
     """
     Data generation function. Generate more than 1 labels for each input
 
@@ -229,26 +239,28 @@ def data_generation(pred, X, y, sample_size=2):
     print("Total data size: {0}, correct labeled data size: {1}".format(correct_pred.shape[0],
                                                                         np.sum(correct_pred)))
     X = X[correct_pred, :]
+    print(X.shape)
     # softmax with soften operation
     pred = pred[correct_pred, :]/4
+    p = np.exp(pred) / np.sum(np.exp(pred),axis=1)[:, None]
     # generate random normal noise
     rand = np.random.normal(loc=np.repeat(0,y.shape[1]),
-                            scale=np.append(np.repeat(0.5,y.shape[1]-1), 0),
+                            scale=np.append(np.repeat(var,y.shape[1]-1), 0),
                             size=(X.shape[0],y.shape[1]))
+    p = np.exp(pred) / np.sum(np.exp(pred),axis=1)[:, None]
     # add noise to data
     pred += rand
     dist = np.exp(pred) / np.sum(np.exp(pred),axis=1)[:, None]
     # define sample methods
     f = lambda x: np.random.choice(range(dist.shape[1]),size=sample_size, p=x)
-    labels = np.apply_along_axis(f, 1, dist)
+    labels = np.sum(np.apply_along_axis(f, 1, dist), axis=1)
     print("Data Generation finished...")
     # return new input and labels
-    return np.repeat(X, sample_size, axis=0), \
-           np.eye(pred.shape[1])[np.reshape(labels, (np.prod(labels.shape),), order="F")]
+    return X, np.eye(sample_size+1)[labels], p
 
 class data_set():
     """data set"""
-    def __init__(self, X, y):
+    def __init__(self, X, y, prob=None):
         """
         initialized method, set write authority = False for labels
 
@@ -256,6 +268,7 @@ class data_set():
         ----------
         X: numpy matrix with size [data_size, input_size]
         y: numpy matrix(one-hot) or array with size [data_size, ?]
+        prob: probability
 
         Attributes
         ----------
@@ -271,6 +284,9 @@ class data_set():
             raise ValueError("X and y should have same sample size!")
         self._images = X.copy()
         self._labels = y.copy()
+        self._probs = prob
+        if prob is not None:
+            self._probs = prob.copy()
         self._labels.setflags(write=0)
         self._index_in_epoch = 0
         self._num_examples = X.shape[0]
@@ -298,6 +314,8 @@ class data_set():
             np.random.shuffle(perm)
             self._images = self._images[perm]
             self._labels = self._labels[perm]
+            if self._probs is not None:
+                self._probs = self._probs[perm]
             start = 0
             self._index_in_epoch = batch_size
             # check for batch_size scale
@@ -315,6 +333,11 @@ class data_set():
     def labels(self):
         """read-only label attribute"""
         return self._labels
+
+    @property
+    def probs(self):
+        """read-only prob attribute"""
+        return self._probs
 
 class group_data_set(data_set):
     """
@@ -388,7 +411,7 @@ class group_data_set(data_set):
 
 class simulate_data():
     """simulate data"""
-    def __init__(self, shuffle=True, X=None, y=None, path=".", image_file=None, label_file=None):
+    def __init__(self, shuffle=True, X=None, y=None, prob=None, path=".", image_file=None, label_file=None, prob_file=None):
         """
         initialize method, divide data into 3 parts: train, test, validation
 
@@ -414,10 +437,12 @@ class simulate_data():
         if (X is not None) and (y is not None):
             X = X
             y = y
+            p = prob
         # read from data file
         elif (image_file is not None) and (label_file is not None):
             X = self.__from_file__(file_name=image_file, path=path)
             y = self.__from_file__(file_name=label_file, path=path)
+            p = self.__from_file__(file_name=prob_file, path=path)
             print("Read data finished...")
         else:
             raise ValueError("enter valid data!")
@@ -429,11 +454,16 @@ class simulate_data():
             np.random.shuffle(perm)
         # determine split ratio
         train = perm[:int(len(perm)*0.79)]
-        test = perm[int(len(perm)*0.79):int(len(perm)*0.93)]
-        validation = perm[int(len(perm)*0.93):]
-        self.train = data_set(X = X[train,:], y = y[train, :])
-        self.test = data_set(X = X[test,:], y = y[test, :])
-        self.validation = data_set(X = X[validation,:], y = y[validation, :])
+        test = perm[int(len(perm)*0.79):int(len(perm)*0.99)]
+        validation = perm[int(len(perm)*0.99):]
+        if p is not None:
+            self.train = data_set(X = X[train,:], y = y[train, :],prob=p[train, :])
+            self.test = data_set(X = X[test,:], y = y[test, :],prob=p[test, :])
+            self.validation = data_set(X = X[validation,:], y = y[validation, :],prob=p[validation,:])
+        else:
+            self.train = data_set(X = X[train,:], y = y[train, :])
+            self.test = data_set(X = X[test,:], y = y[test, :])
+            self.validation = data_set(X = X[validation,:], y = y[validation, :])
         print("Split data finished...")
 
     def merge_all(self):
@@ -447,12 +477,19 @@ class simulate_data():
             self.train.labels,
             self.test.labels,
             self.validation.labels), axis=0)
+        if self.train._probs is not None:
+            self.train._probs = np.concatenate((
+                self.train.probs,
+                self.test.probs,
+                self.validation.probs), axis=0)
         print("merge all data finished.")
 
 
     def __from_file__(self, file_name, path="."):
         """read from file"""
         # read from .npy file
+        if file_name is None:
+            return None
         if file_name[-3:] == 'npy':
             return np.load(path + "/" + file_name)
         # read from .npz file
@@ -470,6 +507,9 @@ class simulate_data():
         """save to file"""
         X = np.concatenate((self.train.images, self.test.images, self.validation.images), axis=0)
         y = np.concatenate((self.train.labels, self.test.labels, self.validation.labels), axis=0)
+        if self.train.probs is not None:
+            p = np.concatenate((self.train.probs,self.test.probs,self.validation.probs), axis=0)
+            np.savez_compressed(path+"/"+name+"_probs", p=p)
         np.savez_compressed(path+"/"+name+"_images", X=X)
         np.savez_compressed(path+"/"+name+"_labels", y=y)
         print("Data saved...")
@@ -514,21 +554,23 @@ class group_simulate_data(simulate_data):
         self.validation = group_data_set(X_validation,y_validation,self._group_size)
         print("Split data finished...")
 
-
 def main():
     """main function"""
     # get data
     mnist = data_munipulate()
     # construct and train DNN
     gdnet = generation_net(data = mnist)
-    gdnet.train_net(training_iters=200000,learning_rate=0.001,
+    gdnet.train_net(training_iters=80000,learning_rate=0.001,
                     batch_size=128, display_step=100, dropout=1)
     # sample new labels
-    X,y = data_generation(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
-                           y=gdnet.data.train.labels.copy(), sample_size=4)
-    # for group data
-    data = group_simulate_data(group_size=4, X=X, y=y)
-    data.to_file(name="group_simulation", path="./simulation_data")
+    X,y,dist = data_generation(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
+                           y=gdnet.data.train.labels.copy(), var=0.5, sample_size=2)
+    data = simulate_data(X=X, y=y,prob=dist)
+    data.to_file(name="new_simulation", path="./simulation_data")
+    X,y,dist = data_generation(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
+                           y=gdnet.data.train.labels.copy(), var=2, sample_size=2)
+    data = simulate_data(X=X, y=y,prob=dist)
+    data.to_file(name="new_simulation2", path="./simulation_data")
     # for non-group data
     #data = simulate_data(X=X, y=y)
     #data.to_file(name="simulation",path="./simulation_data")
