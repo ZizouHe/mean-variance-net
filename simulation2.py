@@ -7,7 +7,7 @@ import scipy.stats as stats
 
 SAMPLE_SIZE = 2
 NUM_CLASSES = 2
-N_INPUT = 400
+N_INPUT = 784
 NAME = "new_simulation"
 # Parameters, set seed
 np.random.seed(seed=1)
@@ -24,7 +24,7 @@ def generate(data_size=10000):
     # data
     X = np.random.uniform(0, 1, size=(data_size,N_INPUT))
     #noise
-    Z = np.random.normal(0,0.000001, size=(data_size, NUM_CLASSES))
+    Z = np.random.normal(0,0.5, size=(data_size, NUM_CLASSES))
     # calculate p
     logits = (X.dot(W)+b)
     logits = np.apply_along_axis(normalized, 1, logits)
@@ -310,8 +310,6 @@ class conv_net():
             with tf.variable_scope("weight", reuse=None):
                 self.variables[layer_name+'_w'] = initial_variable(name= 'weight',shape=input_dim+output_dim,
                                                                    dtype=tf.float32, initializer=initializer)
-
-
             with tf.variable_scope("bias", reuse=None):
                 self.variables[layer_name+'_b'] = initial_variable(name= 'bias',shape=output_dim, dtype=tf.float32,
                                                                    initializer="constant")
@@ -416,8 +414,8 @@ class conv_net2():
 
         return self.out
 
-class alpha_beta_net():
-    """Alpha-Beta Network for Classification."""
+class mv_net():
+    """mean and variance Network for Classification."""
     def __init__(self, data):
         self.data = data
 
@@ -433,52 +431,42 @@ class alpha_beta_net():
             tf.summary.scalar('learning_rate', self.learning_rate)
             self.global_steps = tf.Variable(0,dtype=tf.int32,name='globel_steps')
 
-        with tf.variable_scope('alpha_net', reuse=None):
-            self.alpha_net = conv_net2('alpha_net')
-            # construct alpha network use truncated-normal initializer
-            self.alpha_net.network(x=self.x, dropout=self.keep_prob,
+        with tf.variable_scope('mean_net', reuse=None):
+            self.mean_net = conv_net('mean_net')
+            # construct mean network use truncated-normal initializer
+            self.mean_net.network(x=self.x, dropout=self.keep_prob,
                                    strides=strides[:4])
-            self.alpha_net.out = tf.nn.elu(self.alpha_net.out)+1
 
             with tf.variable_scope('output', reuse=None):
-                #self.alpha_net.out = tf.sigmoid(self.alpha_net.out)
-                variable_summaries(self.alpha_net.out, 'values')
+                #self.mean_net.out = tf.sigmoid(self.mean_net.out)
+                variable_summaries(self.mean_net.out, 'values')
 
-        with tf.variable_scope('beta_net', reuse=None):
-            self.beta_net = conv_net2('beta_net')
-            # construct alpha network use truncated-normal initializer
-            self.beta_net.network(x=self.x,dropout=self.keep_prob,
+        with tf.variable_scope('var_net', reuse=None):
+            self.var_net = conv_net('var_net')
+            # construct mean network use truncated-normal initializer
+            self.var_net.network(x=self.x,dropout=self.keep_prob,
                                    strides=strides[4:])
-            self.beta_net.out = tf.nn.elu(self.beta_net.out)+1
+            self.var_net.out = tf.nn.elu(self.var_net.out)+1
 
             with tf.variable_scope('output', reuse=None):
-                #self.beta_net.out = tf.sigmoid(self.beta_net.out)
-                variable_summaries(self.beta_net.out, 'values')
+                #self.var_net.out = tf.sigmoid(self.var_net.out)
+                variable_summaries(self.var_net.out, 'values')
 
     def __define_measure__(self):
-        def beta_likelihood(pred1, pred2, y):
-            deno = tf.multiply(
-                tf.add(pred1,pred2),
-                tf.add(tf.add(pred1,pred2),1))
-            nomi1 = tf.reshape(tf.multiply(pred1, pred1+1), shape=[-1,1])
-            nomi2 = 2*tf.reshape(tf.multiply(pred1, pred2), shape=[-1,1])
-            nomi3 = tf.reshape(tf.multiply(pred2, pred2+1), shape=[-1,1])
-            likelihood = tf.div(
-                tf.concat([nomi1, nomi2, nomi3],1),
-                deno)
-            return likelihood, tf.reduce_sum(tf.multiply(likelihood, y),1)
+        def likeli_func(mean, var, y):
+            dist = tf.contrib.distributions.Normal(loc=mean, scale=var)
+            f1 = lambda x: tf.pow(1/(1+tf.exp(-x)),2)
+            f2 = lambda x: tf.div(2*tf.exp(-x), tf.pow(1+tf.exp(-x),2))
+            f3 = lambda x: tf.pow(1/(1+tf.exp(x)),2)
+            out1 = tf.contrib.bayesflow.monte_carlo.expectation(f=f1,p=dist,n=1000)
+            out2 = tf.contrib.bayesflow.monte_carlo.expectation(f=f2,p=dist,n=1000)
+            out3 = tf.contrib.bayesflow.monte_carlo.expectation(f=f3,p=dist,n=1000)
+            out = tf.concat([out1, out2, out3], axis=1)
+            return out, tf.reduce_sum(tf.multiply(out, y),1)
 
-        def bernoulli(pred1, pred2, y):
-            p = tf.nn.softmax(tf.concat([pred1, pred2], axis=1))
-            nomi1 = tf.reshape(tf.pow(p[:,0], 2), shape=[-1,1])
-            nomi2 = 2*tf.reshape(tf.multiply(p[:,0], p[:,1]), shape=[-1,1])
-            nomi3 = tf.reshape(tf.pow(p[:,1], 2), shape=[-1,1])
-            likelihood = tf.concat([nomi1, nomi2, nomi3], axis=1)
-            return likelihood, tf.reduce_sum(tf.multiply(likelihood,y),1)
+        likelihood, true_value = likeli_func(self.mean_net.out,self.var_net.out,self.y)
 
-        likelihood, true_value = beta_likelihood(self.alpha_net.out,self.beta_net.out,self.y)
-
-        #likelihood, true_value = bernoulli(self.alpha_net.out,self.beta_net.out,self.y)
+        #likelihood, true_value = bernoulli(self.mean_net.out,self.var_net.out,self.y)
 
         with tf.variable_scope('accuracy', reuse=None):
             with tf.variable_scope('correct_prediction', reuse=None):
@@ -490,15 +478,9 @@ class alpha_beta_net():
 
         with tf.variable_scope('cost', reuse=None):
             self.cost = -tf.reduce_mean(tf.log(true_value))
-            self.virtual_cost = tf.reduce_mean(
-                tf.add(
-                    tf.pow(tf.subtract(self.alpha_net.out,3),2),
-                    tf.pow(tf.subtract(self.beta_net.out,3),2)))
-            #self.virtual_cost = tf.reduce_mean(tf.add(tf.subtract(self.alpha_net.out,3),tf.subtract(self.beta_net.out,3)))
-            #self.validation_cost = cost_func(self.alpha_net.out,self.beta_net.out,self.y)
+
         tf.summary.scalar('train_cost', self.cost)
         #tf.summary.scalar('validation_cost', self.validation_cost)
-        self.likelihood = likelihood
 
     def __optimization__(self, learning_rate=0.001):
         """Define optimization methods for networks."""
@@ -513,10 +495,9 @@ class alpha_beta_net():
                 j)
             for i,j in gradient if i is not None]
             self.optimizer = opt.apply_gradients(gradient, global_step = self.global_steps)
-            self.virtual_optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(self.virtual_cost)
 
-    def train_net(self, virtual, training_iters = 40000, learning_rate = 0.001, batch_size = 128,
-                  display_step = 10, dropout = 0.75, strides = [1,2,1,2,1,2,1,2]):
+    def train_net(self, training_iters = 40000, learning_rate = 0.001, batch_size = 128,
+                  display_step = 10, dropout = 0.75, strides = [1,2,1,2,1,2,1,2], test_opt = "test"):
         # Initializing network
         self.__construct_net__(strides=strides)
         self.__define_measure__()
@@ -528,42 +509,12 @@ class alpha_beta_net():
         with tf.Session() as sess:
             sess.run(init)
             step = 1
-            validation = np.array([])
-            if virtual is True:
-                print("virtual train start...")
-                while step * 128 <= 30000:
-                    batch_x, batch_y = self.data.train.next_batch(128)
-                    # Run optimization op (backprop)
-                    sess.run(self.virtual_optimizer,
-                                           feed_dict={self.x: batch_x,
-                                                      self.y: batch_y,
-                                                      self.keep_prob: dropout,
-                                                      self.learning_rate: 0.001})
-                    #train_writer.add_summary(summary, step)
-                    # display training intermediate result
-                    if step % 10 == 0:
-                        # Calculate batch loss and accuracy
-                        loss = sess.run(self.virtual_cost,
-                                              feed_dict={self.x: batch_x,
-                                                         self.y: batch_y,
-                                                         self.keep_prob: 1.})
-                        print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + \
-                              "{:.6f}".format(loss))
-                        a = input("continue?")
-                        if a != "":
-                            break
-
-                    step += 1
-                print("virtual train finished...")
-
-            step = 1
             # Record train data
             # $ tensorboard --logdir=./summary_abnet
-            train_writer = tf.summary.FileWriter('./tensorboard_simunet',
+            train_writer = tf.summary.FileWriter('./tensorboard_simunet2',
                                                   sess.graph)
 
             # Keep training until reach max iterations
-            #batch_x, batch_y = self.data.train.next_batch(batch_size)
             while step * batch_size <= training_iters:
                 batch_x, batch_y = self.data.train.next_batch(batch_size)
                 # Run optimization op (backprop)
@@ -583,71 +534,60 @@ class alpha_beta_net():
                     print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + \
                           "{:.6f}".format(loss) + ", Training Accuracy= " + \
                           "{:.5f}".format(acc))
-                    #print("max gradient: {:.4f}".format(max([np.max(np.abs(i)) for i in ggg])))
-                    #print("min gradient: {:.4f}".format(min([np.min(np.abs(i)) for i in ggg])))
-                """
-                    loss = sess.run(self.cost, feed_dict = {
-                        self.x: self.data.validation.images,
-                        self.y: self.data.validation.labels,
-                        self.keep_prob: 1.})
-                    validation = np.append(validation, loss)
-
-                if step % (display_step*10) == 0:
-                    pd.Series(validation).plot()
-                    a = input("continue?")
-                    if a != "":
-                        break
-                """
-
                 step += 1
 
             print("Optimization finished")
             # Calculate test loss
-            loss, acc, lkh, alpha, beta = sess.run([self.cost,self.accuracy, self.likelihood,self.alpha_net.out, self.beta_net.out],
-                                  feed_dict={self.x: self.data.test.images,
-                                             self.y: self.data.test.labels,
-                                             self.keep_prob: 1.})
-            print("Test Loss= {:.6f}".format(loss) +", Test Accuracy= {:.5f}".format(acc))
+            loss,accu,mean,var = [],[], [], []
+            if test_opt == "test":
+                dta = self.data.test
+            elif test_opt == "train":
+                dta = self.data.train
+            for i in range((dta.images.shape[0]//100)+1):
+                start = i*100
+                end = (i+1)*100 if i < dta.images.shape[0]//100 else dta.images.shape[0]
+                ls, ac, mn, vr = sess.run([self.cost,self.accuracy,self.mean_net.out, self.var_net.out],
+                    feed_dict={self.x: dta.images[start:end,:],
+                    self.y: dta.labels[start:end,:],
+                    self.keep_prob: 1.})
+                loss.append(ls)
+                accu.append(ac)
+                mean.append(mn)
+                var.append(vr)
+            print(test_opt+" loss= {:.6f}".format(sum(loss)/len(loss)) +
+                ", "+test_opt+" accuracy= {:.5f}".format(sum(accu)/len(accu)))
             #print(lkh)
 
-            return alpha, beta
+            return np.concatenate(mean, axis=0), np.concatenate(var,axis=0)
 
-def evaludate(alpha,beta,prob):
-    def variance(x,y):
-        return x*y/(x+y)**2/(x+y+1)
-    var = variance(alpha, beta)
-    prob_hat = alpha/(alpha+beta)
-    prob = np.reshape(prob[:, 0], (prob.shape[0],1))
-    dist = np.abs(prob_hat-prob[:,0])
-    left_bnd = stats.beta.cdf(0.2, alpha, beta)
-    right_bnd = stats.beta.cdf(0.8, alpha, beta)
-    a = (left_bnd < prob) & (right_bnd > prob)
-    print("{:.1f}" + "%" + " of real p falls in the 60% prediction interval".format(100*np.sum(a)/a.shape[0]))
+def evaludate(mean,var,prob):
+    for i in range(1,20):
+        pct = i*5/100.0
+        left_bnd, right_bnd = stats.norm.interval(alpha=pct, loc=mean, scale=var)
+        left_bnd = 1/(1+np.exp(-left_bnd))
+        right_bnd = 1/(1+np.exp(-right_bnd))
+        prob = np.reshape(prob[:, 0], (prob.shape[0],1))
+        judge = (left_bnd < prob) & (right_bnd > prob)
+        print("{:.1f}".format(100*np.sum(judge)/judge.shape[0]) +
+            "% of real p falls in the {:.1f}% prediction interval".format(100*pct))
 
 def main():
-    X,y,p = generate(70000)
+    #X,y,p = generate(70000)
     data = simulate_data(
         path="./simulation_data",
         image_file=NAME+"_images.npz",
         label_file=NAME+"_labels.npz",
         prob_file=NAME+"_probs.npz")
-    data = simulate_data(X=X, y=y,prob=p)
-    abnet = alpha_beta_net(data)
-    alpha, beta = abnet.train_net(
-        virtual = False,
+    #data = simulate_data(X=X, y=y,prob=p)
+    mvnet = mv_net(data)
+    mean, var = mvnet.train_net(
         training_iters=80000,
-        learning_rate=0.0003,
+        learning_rate=0.001,
         batch_size=128,
-        display_step=100,
-        dropout=0.75)
-    evaludate(alpha, beta, abnet.data.test.probs.copy())
-    """
-    logits = X.dot(W)+b
-    p = np.exp(logits)/np.sum(np.exp(logits), axis=1,keepdims=True)
-    p2 = pred/np.sum(pred,1,keepdims=True)
-    """
-    #return pred
-
+        display_step=50,
+        dropout=0.75,
+        test_opt="train")
+    evaludate(mean, var, mvnet.data.train.probs.copy())
 
 if __name__ == '__main__':
     main()

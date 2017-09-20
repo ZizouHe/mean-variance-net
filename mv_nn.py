@@ -314,7 +314,6 @@ class mean_var_net():
 
             print("Optimization Finished!")
 
-
 if __name__ == '__main__':
     # read and munipulate data
     mnist = input_data.read_data_sets("MNIST_data/", one_hot=False)

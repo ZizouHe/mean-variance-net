@@ -4,17 +4,20 @@ from math import sqrt
 from data_generate import data_set,simulate_data
 import pandas as pd
 import scipy.stats as stats
+import pandas as pd
+import matplotlib.pyplot as plt
 
 SAMPLE_SIZE = 2
 NUM_CLASSES = 2
-N_INPUT = 400
-NAME = "new_simulation"
+N_INPUT = 784
+NAME = "simulation_var0.5"
 # Parameters, set seed
 np.random.seed(seed=1)
 W = np.random.normal(0,1,size=(N_INPUT, NUM_CLASSES))
 b = np.random.normal(0,1,size=(NUM_CLASSES,))
 # reset seed
 np.random.seed(seed=None)
+from datetime import datetime
 
 def normalized(x):
     from scipy.linalg.misc import norm
@@ -434,22 +437,22 @@ class alpha_beta_net():
             self.global_steps = tf.Variable(0,dtype=tf.int32,name='globel_steps')
 
         with tf.variable_scope('alpha_net', reuse=None):
-            self.alpha_net = conv_net2('alpha_net')
+            self.alpha_net = conv_net('alpha_net')
             # construct alpha network use truncated-normal initializer
             self.alpha_net.network(x=self.x, dropout=self.keep_prob,
                                    strides=strides[:4])
-            self.alpha_net.out = tf.nn.elu(self.alpha_net.out)+1
+            self.alpha_net.out2 = tf.nn.elu(self.alpha_net.out)+1
 
             with tf.variable_scope('output', reuse=None):
                 #self.alpha_net.out = tf.sigmoid(self.alpha_net.out)
                 variable_summaries(self.alpha_net.out, 'values')
 
         with tf.variable_scope('beta_net', reuse=None):
-            self.beta_net = conv_net2('beta_net')
+            self.beta_net = conv_net('beta_net')
             # construct alpha network use truncated-normal initializer
             self.beta_net.network(x=self.x,dropout=self.keep_prob,
                                    strides=strides[4:])
-            self.beta_net.out = tf.nn.elu(self.beta_net.out)+1
+            self.beta_net.out2 = tf.nn.elu(self.beta_net.out)+1
 
             with tf.variable_scope('output', reuse=None):
                 #self.beta_net.out = tf.sigmoid(self.beta_net.out)
@@ -457,6 +460,8 @@ class alpha_beta_net():
 
     def __define_measure__(self):
         def beta_likelihood(pred1, pred2, y):
+            #pred1 = tf.nn.elu(pred1)+1
+            #pred2 = tf.nn.elu(pred2)+1
             deno = tf.multiply(
                 tf.add(pred1,pred2),
                 tf.add(tf.add(pred1,pred2),1))
@@ -476,7 +481,8 @@ class alpha_beta_net():
             likelihood = tf.concat([nomi1, nomi2, nomi3], axis=1)
             return likelihood, tf.reduce_sum(tf.multiply(likelihood,y),1)
 
-        likelihood, true_value = beta_likelihood(self.alpha_net.out,self.beta_net.out,self.y)
+        likelihood, true_value = beta_likelihood(self.alpha_net.out2,self.beta_net.out2,self.y)
+
 
         #likelihood, true_value = bernoulli(self.alpha_net.out,self.beta_net.out,self.y)
 
@@ -494,8 +500,6 @@ class alpha_beta_net():
                 tf.add(
                     tf.pow(tf.subtract(self.alpha_net.out,3),2),
                     tf.pow(tf.subtract(self.beta_net.out,3),2)))
-            #self.virtual_cost = tf.reduce_mean(tf.add(tf.subtract(self.alpha_net.out,3),tf.subtract(self.beta_net.out,3)))
-            #self.validation_cost = cost_func(self.alpha_net.out,self.beta_net.out,self.y)
         tf.summary.scalar('train_cost', self.cost)
         #tf.summary.scalar('validation_cost', self.validation_cost)
         self.likelihood = likelihood
@@ -509,7 +513,7 @@ class alpha_beta_net():
             gradient = [(
                 tf.multiply(
                     tf.sign(i),
-                    tf.clip_by_value(i, 1e-4, 1e4)),
+                    tf.clip_by_value(i, 1e-2, 1e2)),
                 j)
             for i,j in gradient if i is not None]
             self.optimizer = opt.apply_gradients(gradient, global_step = self.global_steps)
@@ -531,7 +535,7 @@ class alpha_beta_net():
             validation = np.array([])
             if virtual is True:
                 print("virtual train start...")
-                while step * 128 <= 30000:
+                while step * 128 <= 6000:
                     batch_x, batch_y = self.data.train.next_batch(128)
                     # Run optimization op (backprop)
                     sess.run(self.virtual_optimizer,
@@ -549,10 +553,11 @@ class alpha_beta_net():
                                                          self.keep_prob: 1.})
                         print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + \
                               "{:.6f}".format(loss))
+                        """
                         a = input("continue?")
                         if a != "":
                             break
-
+                        """
                     step += 1
                 print("virtual train finished...")
 
@@ -583,46 +588,78 @@ class alpha_beta_net():
                     print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + \
                           "{:.6f}".format(loss) + ", Training Accuracy= " + \
                           "{:.5f}".format(acc))
-                    #print("max gradient: {:.4f}".format(max([np.max(np.abs(i)) for i in ggg])))
-                    #print("min gradient: {:.4f}".format(min([np.min(np.abs(i)) for i in ggg])))
-                """
-                    loss = sess.run(self.cost, feed_dict = {
-                        self.x: self.data.validation.images,
-                        self.y: self.data.validation.labels,
-                        self.keep_prob: 1.})
-                    validation = np.append(validation, loss)
-
-                if step % (display_step*10) == 0:
-                    pd.Series(validation).plot()
-                    a = input("continue?")
-                    if a != "":
-                        break
-                """
 
                 step += 1
 
             print("Optimization finished")
             # Calculate test loss
-            loss, acc, lkh, alpha, beta = sess.run([self.cost,self.accuracy, self.likelihood,self.alpha_net.out, self.beta_net.out],
-                                  feed_dict={self.x: self.data.test.images,
-                                             self.y: self.data.test.labels,
-                                             self.keep_prob: 1.})
-            print("Test Loss= {:.6f}".format(loss) +", Test Accuracy= {:.5f}".format(acc))
-            #print(lkh)
+            loss,accu,alpha,beta = [],[], [], []
+            test_opt = "test"
+            dta = self.data.test
+            for i in range((dta.images.shape[0]//100)+1):
+                start = i*100
+                end = (i+1)*100 if i < dta.images.shape[0]//100 else dta.images.shape[0]
+                ls, ac, a, b = sess.run([self.cost,self.accuracy,self.alpha_net.out2, self.beta_net.out2],
+                    feed_dict={self.x: dta.images[start:end,:],
+                    self.y: dta.labels[start:end,:],
+                    self.keep_prob: 1.})
+                loss.append(ls)
+                accu.append(ac)
+                alpha.append(a)
+                beta.append(b)
+            print(test_opt+" loss= {:.6f}".format(sum(loss)/len(loss)) +
+                ", "+test_opt+" accuracy= {:.5f}".format(sum(accu)/len(accu)))
 
-            return alpha, beta
+            test_a, test_b = np.concatenate(alpha, axis=0), np.concatenate(beta,axis=0)
 
-def evaludate(alpha,beta,prob):
+            loss,accu,alpha,beta = [],[], [], []
+            test_opt = "train"
+            dta = self.data.train
+            for i in range((dta.images.shape[0]//100)+1):
+                start = i*100
+                end = (i+1)*100 if i < dta.images.shape[0]//100 else dta.images.shape[0]
+                ls, ac, a, b = sess.run([self.cost,self.accuracy,self.alpha_net.out2, self.beta_net.out2],
+                    feed_dict={self.x: dta.images[start:end,:],
+                    self.y: dta.labels[start:end,:],
+                    self.keep_prob: 1.})
+                loss.append(ls)
+                accu.append(ac)
+                alpha.append(a)
+                beta.append(b)
+            print(test_opt+" loss= {:.6f}".format(sum(loss)/len(loss)) +
+                ", "+test_opt+" accuracy= {:.5f}".format(sum(accu)/len(accu)))
+
+            train_a, train_b = np.concatenate(alpha, axis=0), np.concatenate(beta,axis=0)
+
+            return train_a, train_b, test_a, test_b
+
+def evaludate(alpha,beta,prob, test_opt):
+    print("start evaluation...")
     def variance(x,y):
         return x*y/(x+y)**2/(x+y+1)
     var = variance(alpha, beta)
     prob_hat = alpha/(alpha+beta)
-    prob = np.reshape(prob[:, 0], (prob.shape[0],1))
-    dist = np.abs(prob_hat-prob[:,0])
-    left_bnd = stats.beta.cdf(0.2, alpha, beta)
-    right_bnd = stats.beta.cdf(0.8, alpha, beta)
-    a = (left_bnd < prob) & (right_bnd > prob)
-    print("{:.1f}" + "%" + " of real p falls in the 60% prediction interval".format(100*np.sum(a)/a.shape[0]))
+    alpha = np.reshape(alpha,alpha.shape[0])
+    beta = np.reshape(beta,beta.shape[0])
+    prob = prob[:, 0]
+    a = []
+    b = []
+    for i in range(1,100):
+        pct = i/100.0
+        left_bnd, right_bnd = stats.beta.interval(pct, alpha, beta)
+        judge = (left_bnd < prob) & (right_bnd > prob)
+        a.append(np.sum(judge)/judge.shape[0]*100.0)
+        b.append(i)
+    df = pd.DataFrame({"estimator":a, "real value":b})
+    df.plot(title = "Prediction Interval")
+    #plt.show()
+    time = datetime.now()
+    plt.savefig(str(time.hour)+":"+str(time.minute)+"_"+NAME+"_"+test_opt+".jpg")
+    print("evaluation finished")
+
+        #print("{:.2f}% of real probability falls in the {:.1f}% prediction interval".format(
+        #    100*np.sum(a)/a.shape[0],
+        #    pct*100))
 
 def main():
     X,y,p = generate(70000)
@@ -631,23 +668,25 @@ def main():
         image_file=NAME+"_images.npz",
         label_file=NAME+"_labels.npz",
         prob_file=NAME+"_probs.npz")
-    data = simulate_data(X=X, y=y,prob=p)
+    #data = simulate_data(X=X, y=y,prob=p)
     abnet = alpha_beta_net(data)
-    alpha, beta = abnet.train_net(
-        virtual = False,
-        training_iters=80000,
-        learning_rate=0.0003,
+    train_alpha, train_beta, test_alpha, test_beta = abnet.train_net(
+        virtual = True,
+        training_iters=50000,
+        learning_rate=0.0005,
         batch_size=128,
-        display_step=100,
-        dropout=0.75)
-    evaludate(alpha, beta, abnet.data.test.probs.copy())
-    """
-    logits = X.dot(W)+b
-    p = np.exp(logits)/np.sum(np.exp(logits), axis=1,keepdims=True)
-    p2 = pred/np.sum(pred,1,keepdims=True)
-    """
-    #return pred
-
+        display_step=50,
+        dropout=1.)
+    evaludate(
+        train_alpha,
+        train_beta,
+        abnet.data.train.probs.copy(),
+        "train")
+    evaludate(
+        test_alpha,
+        test_beta,
+        abnet.data.test.probs.copy(),
+        "test")
 
 if __name__ == '__main__':
     main()

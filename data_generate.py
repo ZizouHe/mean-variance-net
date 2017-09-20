@@ -13,6 +13,9 @@ from tensorflow.examples.tutorials.mnist import input_data
 from base_model import conv_net, variable_summaries, mnist_modify
 import copy
 
+VAR1 = 0.5
+VAR2 = 0.7
+
 def mean(l):
     return sum(l)/len(l)
 
@@ -256,7 +259,7 @@ def data_generation(pred, X, y, var, sample_size=2):
     labels = np.sum(np.apply_along_axis(f, 1, dist), axis=1)
     print("Data Generation finished...")
     # return new input and labels
-    return X, np.eye(sample_size+1)[labels], p
+    return X, np.eye(sample_size+1)[labels], dist
 
 class data_set():
     """data set"""
@@ -560,17 +563,17 @@ def main():
     mnist = data_munipulate()
     # construct and train DNN
     gdnet = generation_net(data = mnist)
-    gdnet.train_net(training_iters=80000,learning_rate=0.001,
+    gdnet.train_net(training_iters=30000,learning_rate=0.001,
                     batch_size=128, display_step=100, dropout=1)
     # sample new labels
     X,y,dist = data_generation(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
-                           y=gdnet.data.train.labels.copy(), var=0.5, sample_size=2)
+                           y=gdnet.data.train.labels.copy(), var=VAR1, sample_size=2)
     data = simulate_data(X=X, y=y,prob=dist)
-    data.to_file(name="new_simulation", path="./simulation_data")
+    data.to_file(name="simulation_var"+str(VAR1), path="./simulation_data")
     X,y,dist = data_generation(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
-                           y=gdnet.data.train.labels.copy(), var=2, sample_size=2)
+                           y=gdnet.data.train.labels.copy(), var=VAR2, sample_size=2)
     data = simulate_data(X=X, y=y,prob=dist)
-    data.to_file(name="new_simulation2", path="./simulation_data")
+    data.to_file(name="simulation_var"+str(VAR2), path="./simulation_data")
     # for non-group data
     #data = simulate_data(X=X, y=y)
     #data.to_file(name="simulation",path="./simulation_data")
