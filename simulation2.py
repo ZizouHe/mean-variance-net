@@ -582,7 +582,7 @@ def main():
     mvnet = mv_net(data)
     mean, var = mvnet.train_net(
         training_iters=80000,
-        learning_rate=0.001,
+        learning_rate=0.001 ,
         batch_size=128,
         display_step=50,
         dropout=0.75,

@@ -1,23 +1,26 @@
-import numpy as np
 import tensorflow as tf
+import numpy as np
 from math import sqrt
 from data_generate import data_set,simulate_data
 import pandas as pd
 import scipy.stats as stats
 import pandas as pd
 import matplotlib.pyplot as plt
+from datetime import datetime
 
 SAMPLE_SIZE = 2
 NUM_CLASSES = 2
 N_INPUT = 784
-NAME = "simulation_var0.5"
+NAME = "simulation_var0.7"
+PRIROR = 1
+NUM_MIX = 3
 # Parameters, set seed
 np.random.seed(seed=1)
 W = np.random.normal(0,1,size=(N_INPUT, NUM_CLASSES))
 b = np.random.normal(0,1,size=(NUM_CLASSES,))
 # reset seed
 np.random.seed(seed=None)
-from datetime import datetime
+
 
 def normalized(x):
     from scipy.linalg.misc import norm
@@ -33,8 +36,8 @@ def generate(data_size=10000):
     logits = np.apply_along_axis(normalized, 1, logits)
     p = (np.exp(logits+Z))/np.sum(np.exp(logits+Z), axis=1,keepdims=True)
     p = np.clip(p, 0.05, 0.95)
-    p = 0.7*np.ones((data_size, 1)) + np.random.uniform(-0.1, 0.1, size=(data_size, 1))
-    p = np.concatenate((p, 1-p), axis=1)
+    #p = 0.7*np.ones((data_size, 1)) + np.random.uniform(-0.1, 0.1, size=(data_size, 1))
+    #p = np.concatenate((p, 1-p), axis=1)
 
     # sample
     f = lambda x: np.random.choice(range(p.shape[1]),size=SAMPLE_SIZE, p=x)
@@ -329,7 +332,7 @@ class conv_net():
         self.nn_layer([5,5,1], [32], "conv1", initializer)
         self.nn_layer([5,5,32], [64], "conv2", initializer)
         self.nn_layer([full_size*64], [1024], "fcon1", initializer)
-        self.nn_layer([1024], [NUM_CLASSES-1], "output", initializer)
+        self.nn_layer([1024], [NUM_MIX], "output", initializer)
 
     def network(self, x, dropout, strides,initializer="he"):
         self.__set_variable__(strides=strides, initializer=initializer)
@@ -428,6 +431,7 @@ class alpha_beta_net():
         with tf.variable_scope('input', reuse=None):
             self.x = tf.placeholder(tf.float32, shape=[None, N_INPUT],name='x')
             self.y = tf.placeholder(tf.float32, shape=[None, NUM_CLASSES+1],name='y')
+            self.weights = tf.Variable(np.array([[1,1,1]]),dtype=tf.float32, name="distribution_weights")
 
         with tf.variable_scope('hyperparameter', reuse=None):
             self.keep_prob = tf.placeholder(tf.float32, name='dropout')
@@ -459,29 +463,41 @@ class alpha_beta_net():
                 variable_summaries(self.beta_net.out, 'values')
 
     def __define_measure__(self):
-        def beta_likelihood(pred1, pred2, y):
+        def beta_likelihood(pred1, pred2, y, weights):
             #pred1 = tf.nn.elu(pred1)+1
             #pred2 = tf.nn.elu(pred2)+1
-            deno = tf.multiply(
+            label = tf.reshape(y, shape = [-1, 1, y.shape[1].value])
+            deno = tf.reshape(tf.multiply(
                 tf.add(pred1,pred2),
-                tf.add(tf.add(pred1,pred2),1))
-            nomi1 = tf.reshape(tf.multiply(pred1, pred1+1), shape=[-1,1])
-            nomi2 = 2*tf.reshape(tf.multiply(pred1, pred2), shape=[-1,1])
-            nomi3 = tf.reshape(tf.multiply(pred2, pred2+1), shape=[-1,1])
+                tf.add(tf.add(pred1,pred2),1)),shape=[-1,NUM_MIX,1])
+            nomi1 = tf.reshape(tf.multiply(pred1, pred1+1),
+                shape=[-1,NUM_MIX,1])
+            nomi2 = 2*tf.reshape(tf.multiply(pred1, pred2),
+                shape=[-1,NUM_MIX,1])
+            nomi3 = tf.reshape(tf.multiply(pred2, pred2+1),
+                shape=[-1,NUM_MIX,1])
+            #return likelihood, tf.reduce_sum(tf.multiply(likelihood, y),1)
             likelihood = tf.div(
-                tf.concat([nomi1, nomi2, nomi3],1),
+                tf.concat([nomi1, nomi2, nomi3],2),
                 deno)
-            return likelihood, tf.reduce_sum(tf.multiply(likelihood, y),1)
+            w = tf.reshape(weights, shape=[1,NUM_MIX,1])
+            tf.reduce_sum(tf.multiply(likelihood, w)/tf.reduce_sum(weights),1)
+            true_value = tf.reduce_sum(tf.multiply(likelihood, label),2)
+            return tf.reduce_sum(
+                tf.multiply(likelihood, w)/tf.reduce_sum(weights),1), tf.div(
+                tf.reduce_sum(tf.multiply(true_value, weights),1),
+                tf.reduce_sum(weights))
 
         def bernoulli(pred1, pred2, y):
             p = tf.nn.softmax(tf.concat([pred1, pred2], axis=1))
-            nomi1 = tf.reshape(tf.pow(p[:,0], 2), shape=[-1,1])
-            nomi2 = 2*tf.reshape(tf.multiply(p[:,0], p[:,1]), shape=[-1,1])
+            nomi1 = tf.reshape(tf.pow(p[:,0], 2), shape=[-1,-1,1])
+            print(nomi1)
+            nomi2 = 2*tf.reshape(tf.multiply(p[:,0], p[:,1]), shape=[-1,-1,1])
             nomi3 = tf.reshape(tf.pow(p[:,1], 2), shape=[-1,1])
             likelihood = tf.concat([nomi1, nomi2, nomi3], axis=1)
             return likelihood, tf.reduce_sum(tf.multiply(likelihood,y),1)
 
-        likelihood, true_value = beta_likelihood(self.alpha_net.out2,self.beta_net.out2,self.y)
+        likelihood, true_value = beta_likelihood(self.alpha_net.out2,self.beta_net.out2, self.y,self.weights)
 
 
         #likelihood, true_value = bernoulli(self.alpha_net.out,self.beta_net.out,self.y)
@@ -498,11 +514,12 @@ class alpha_beta_net():
             self.cost = -tf.reduce_mean(tf.log(true_value))
             self.virtual_cost = tf.reduce_mean(
                 tf.add(
-                    tf.pow(tf.subtract(self.alpha_net.out,3),2),
-                    tf.pow(tf.subtract(self.beta_net.out,3),2)))
+                    tf.pow(tf.subtract(self.alpha_net.out,PRIROR),2),
+                    tf.pow(tf.subtract(self.beta_net.out,PRIROR),2)))
         tf.summary.scalar('train_cost', self.cost)
         #tf.summary.scalar('validation_cost', self.validation_cost)
         self.likelihood = likelihood
+        self.true_value = true_value
 
     def __optimization__(self, learning_rate=0.001):
         """Define optimization methods for networks."""
@@ -535,7 +552,7 @@ class alpha_beta_net():
             validation = np.array([])
             if virtual is True:
                 print("virtual train start...")
-                while step * 128 <= 6000:
+                while step * 128 <= 3000:
                     batch_x, batch_y = self.data.train.next_batch(128)
                     # Run optimization op (backprop)
                     sess.run(self.virtual_optimizer,
@@ -581,13 +598,16 @@ class alpha_beta_net():
                 # display training intermediate result
                 if step % display_step == 0:
                     # Calculate batch loss and accuracy
-                    loss, acc,ggg = sess.run([self.cost,self.accuracy,self.gg],
+                    loss, acc,g,gg = sess.run([self.cost,self.accuracy,self.true_value, self.likelihood],
                                           feed_dict={self.x: batch_x,
                                                      self.y: batch_y,
                                                      self.keep_prob: 1.})
                     print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + \
                           "{:.6f}".format(loss) + ", Training Accuracy= " + \
                           "{:.5f}".format(acc))
+
+                    #print(g)
+                    #print(gg)
 
                 step += 1
 
@@ -631,16 +651,19 @@ class alpha_beta_net():
 
             train_a, train_b = np.concatenate(alpha, axis=0), np.concatenate(beta,axis=0)
 
-            return train_a, train_b, test_a, test_b
+            w = sess.run(self.weights)
+
+            return train_a, train_b, test_a, test_b,w
 
 def evaludate(alpha,beta,prob, test_opt):
     print("start evaluation...")
+    print(test_opt)
     def variance(x,y):
         return x*y/(x+y)**2/(x+y+1)
     var = variance(alpha, beta)
     prob_hat = alpha/(alpha+beta)
-    alpha = np.reshape(alpha,alpha.shape[0])
-    beta = np.reshape(beta,beta.shape[0])
+    #alpha = np.reshape(alpha,alpha.shape[0])
+    #beta = np.reshape(beta,beta.shape[0])
     prob = prob[:, 0]
     a = []
     b = []
@@ -650,19 +673,133 @@ def evaludate(alpha,beta,prob, test_opt):
         judge = (left_bnd < prob) & (right_bnd > prob)
         a.append(np.sum(judge)/judge.shape[0]*100.0)
         b.append(i)
+
     df = pd.DataFrame({"estimator":a, "real value":b})
     df.plot(title = "Prediction Interval")
     #plt.show()
     time = datetime.now()
+    #print(a)
     plt.savefig(str(time.hour)+":"+str(time.minute)+"_"+NAME+"_"+test_opt+".jpg")
     print("evaluation finished")
 
         #print("{:.2f}% of real probability falls in the {:.1f}% prediction interval".format(
         #    100*np.sum(a)/a.shape[0],
         #    pct*100))
+        #
+
+
+def mix_pct(alpha, beta, pct, weights):
+    """
+    beta distribution mixture percentile
+    alpha: numpy array like, size = [NUM_MIX, 1]
+    beta: numpy array like, size = [NUM_MIX, 1]
+    pct: percentile
+    """
+    JUDGE = 0.0001
+    def binary_search(start, end, alpha, beta, pct):
+        """
+        binary search for percentile
+        """
+        #print(pct)
+        while True:
+            mid = (start + end)/2.0
+            #print(mid)
+
+            r_pct = 1 - np.sum((1 - stats.beta.cdf(mid, alpha, beta))*weights)/np.sum(weights)
+            #print(r_pct)
+            #c = input("prompt")
+            if abs(r_pct - pct) <= JUDGE:
+                #print(r_pct - pct)
+                break
+            if r_pct < pct:
+                start = mid
+            else:
+                end = mid
+        """
+        mid = (start + end)/2.0
+        r_pct = 1 - np.sum((1 - stats.beta.cdf(mid, alpha, beta))*weights)/np.sum(weights)
+        if abs(r_pct - pct) <= JUDGE:
+            return mid
+        elif r_pct < pct:
+            return binary_search(mid, end, alpha, beta, pct)
+        elif r_pct > pct:
+            return binary_search(start, mid, alpha, beta, pct)
+        """
+        return mid
+    return binary_search(0, 1, alpha, beta, pct)
+
+def interval(alpha, beta, pct, weights):
+    """
+    single side confidence interval
+
+    alpha: numpy array like, size = [data_size, NUM_MIX]
+    beta: numpy array like, size = [data_size, NUM_MIX]
+    pct: percentile
+    """
+    dist = np.concatenate((alpha, beta), axis=1)
+    def intvl(alpha_beta):
+        """
+        alpha_beta: numpy array like, size = [NUM_MIX*2,1]
+        """
+        alpha = alpha_beta[:NUM_MIX]
+        beta = alpha_beta[NUM_MIX:]
+        r_pct = 1 - np.sum((1 - stats.beta.cdf(0.5, alpha, beta))*weights)/np.sum(weights)
+        if pct >= 0:
+            if r_pct <= 0.5:
+                start = mix_pct(alpha, beta, 1 - pct, weights)
+                end = 1
+            else:
+                start = 0
+                end = mix_pct(alpha_beta[:NUM_MIX], alpha_beta[NUM_MIX:], pct, weights)
+        else:
+            if r_pct <= 0.5:
+                start = 0
+                end = mix_pct(alpha_beta[:NUM_MIX], alpha_beta[NUM_MIX:], pct, weights)
+            else:
+                start = mix_pct(alpha, beta, 1 - pct, weights)
+                end = 1
+        return np.array([start, end])
+    """
+    result = np.apply_along_axis(intvl, 1, dist[:BATCH,:])
+    for i in range(1, dist.shape[0]//BATCH):
+        a = i*BATCH
+        b = (i+1)*BATCH
+        result = np.concatenate(
+            (result, np.apply_along_axis(intvl, 1, dist[a:b,:])),
+            axis=0)
+        print(i)
+    result = np.concatenate(
+        (result, np.apply_along_axis(intvl, 1, dist[b:,:])),
+        axis=0)
+    return result
+    """
+    return np.apply_along_axis(intvl, 1, dist)
+
+def evaluate_mix(alpha,beta,prob, weights, test_opt):
+    print("start evaluation...")
+    #print(test_opt)
+    prob = prob[:, 0]
+    a = []
+    b = []
+    for i in range(75,100):
+        pct = i/100.0
+        bound = interval(alpha, beta, pct, weights)
+        judge = (bound[:,0] <= prob) & (bound[:,1] >= prob)
+        a.append(np.sum(judge)/judge.shape[0]*100.0)
+        b.append(i)
+        print(a[-1])
+    print(a)
+    df = pd.DataFrame({"estimator":a, "real value":b})
+    df.plot(title = "Prediction Interval")
+    plt.show()
+    time = datetime.now()
+    #print(a)
+    plt.savefig(str(time.hour)+":"+str(time.minute)+"_"+NAME+"_"+test_opt+".jpg")
+    print("evaluation finished")
+
 
 def main():
-    X,y,p = generate(70000)
+    #X,y,p = generate(70000)
     data = simulate_data(
         path="./simulation_data",
         image_file=NAME+"_images.npz",
@@ -670,23 +807,66 @@ def main():
         prob_file=NAME+"_probs.npz")
     #data = simulate_data(X=X, y=y,prob=p)
     abnet = alpha_beta_net(data)
-    train_alpha, train_beta, test_alpha, test_beta = abnet.train_net(
+    train_alpha, train_beta, test_alpha, test_beta, weights = abnet.train_net(
         virtual = True,
         training_iters=50000,
-        learning_rate=0.0005,
+        learning_rate=0.0002,
         batch_size=128,
-        display_step=50,
+        display_step=20,
         dropout=1.)
-    evaludate(
+    evaluate_mix(
         train_alpha,
         train_beta,
         abnet.data.train.probs.copy(),
         "train")
-    evaludate(
+    evaluate_mix(
         test_alpha,
         test_beta,
         abnet.data.test.probs.copy(),
+        weights,
         "test")
 
 if __name__ == '__main__':
     main()
+"""
+import tensorflow as tf
+import numpy as np
+a = tf.placeholder(tf.float32, shape=[None, 3])
+b = tf.placeholder(tf.float32, shape=[None, 3])
+deno = tf.reshape(tf.multiply(tf.add(a,b),tf.add(tf.add(a,b),1)),shape=[-1,3,1])
+nomi1 = tf.reshape(tf.multiply(a, a+1),shape=[-1,3,1])
+nomi2 = tf.reshape(2*tf.multiply(a,b),shape=[-1,3,1])
+nomi3 = tf.reshape(tf.multiply(b, b+1),shape=[-1,3,1])
+dd = tf.concat([nomi1, nomi2, nomi3],2)
+#result = tf.div(tf.concat([nomi1, nomi2, nomi3],1), deno)
+result = tf.div(dd, deno)
+y = tf.placeholder(tf.float32, shape=[None, 3])
+s = tf.reshape(y, [-1,y.shape[1].value, 1])
+res = tf.multiply(result, s)
+init = tf.global_variables_initializer()
+
+with tf.Session() as sess:
+    sess.run(init)
+    a1,a2,a3,b1,d1,re,r = sess.run([nomi1,nomi2,nomi3,deno,dd,result,res],feed_dict={
+        a: np.array([[1,0,1],[0,1,1]]),
+        b: np.array([[1,0,0],[0,1,0]]),
+        y: np.array([[1,0,0],[0,1,0]])
+        })
+    print(a1.shape)
+    print(a2.shape)
+    print(a3.shape)
+    #print(b1)
+    #print(d1)
+    print(re)
+    print(r)
+    #cc = sess.run(result, feed_dict={
+    #    a: np.array([[1,0,1],[0,1,1],[1,1,0]]),
+    #    b: np.array([[1,0,0],[0,1,0],[0,0,1]])
+    #    })
+weights = tf.Variable(np.array([[1/3,1/3,1/3]]),dtype=tf.float32, name="distribution_weights")
+init = tf.global_variables_initializer()
+with tf.Session() as sess:
+    sess.run(init)
+    w = sess.run(weights)
+    print(w.shape)
+"""
