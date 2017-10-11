@@ -12,6 +12,7 @@ import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
 from base_model import conv_net, variable_summaries, mnist_modify
 import copy
+from numpy.linalg import norm
 
 VAR1 = 0.5
 VAR2 = 0.7
@@ -557,15 +558,57 @@ class group_simulate_data(simulate_data):
         self.validation = group_data_set(X_validation,y_validation,self._group_size)
         print("Split data finished...")
 
+def data_generation2(pred, X, y, sample_size=2):
+    """
+    Data generation function. Generate more than 1 labels for each input
+
+    Parameters
+    ----------
+    pred: the un-softmax prediction, a.k.a. class score
+          with size of [data_size, class_size]
+    sample_size: how many to sample from 1 distribution
+
+    Return
+    ------
+    1: input data, numpy matrix with size [data_size*sample_size, input_size]
+    2: labels, numpy array/matrix with size [data_size*sample_size, class_size]
+       each row is a label with one-hot representation
+    """
+    # drop wrong labeled data
+    correct_pred = np.equal(np.argmax(pred,1),np.argmax(y,1))
+    print("Total data size: {0}, correct labeled data size: {1}".format(correct_pred.shape[0],
+                                                                        np.sum(correct_pred)))
+    X = X[correct_pred, :]
+    print(X.shape)
+    # softmax with soften operation
+    pred = pred[correct_pred, :]/4
+    pred = pred[:,0] - pred[:,1]
+    # generate random normal noise
+    var = norm(X, axis=1)/15
+    rand = np.random.normal(loc=0,
+                            scale=var,
+                            size=X.shape[0])
+    # add noise to data
+    pred += rand
+    pred = np.concatenate((pred[:,None], np.repeat(0.0,X.shape[0])[:,None]),axis=1)
+    dist = np.exp(pred) / np.sum(np.exp(pred),axis=1)[:, None]
+    # define sample methods
+    f = lambda x: np.random.choice(range(dist.shape[1]),size=sample_size, p=x)
+    labels = np.sum(np.apply_along_axis(f, 1, dist), axis=1)
+    print("Data Generation finished...")
+    # return new input and labels
+    return X, np.eye(sample_size+1)[labels], dist
+
 def main():
     """main function"""
     # get data
     mnist = data_munipulate()
     # construct and train DNN
     gdnet = generation_net(data = mnist)
-    gdnet.train_net(training_iters=30000,learning_rate=0.001,
+    gdnet.train_net(training_iters=50000,learning_rate=0.001,
                     batch_size=128, display_step=100, dropout=1)
     # sample new labels
+    """
     X,y,dist = data_generation(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
                            y=gdnet.data.train.labels.copy(), var=VAR1, sample_size=2)
     data = simulate_data(X=X, y=y,prob=dist)
@@ -574,6 +617,11 @@ def main():
                            y=gdnet.data.train.labels.copy(), var=VAR2, sample_size=2)
     data = simulate_data(X=X, y=y,prob=dist)
     data.to_file(name="simulation_var"+str(VAR2), path="./simulation_data")
+    """
+    X,y,dist = data_generation2(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
+        y=gdnet.data.train.labels.copy(), sample_size=2)
+    data = simulate_data(X=X, y=y,prob=dist)
+    data.to_file(name="simulation_customized", path="./simulation_data")
     # for non-group data
     #data = simulate_data(X=X, y=y)
     #data.to_file(name="simulation",path="./simulation_data")
@@ -582,3 +630,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

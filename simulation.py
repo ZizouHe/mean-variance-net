@@ -11,6 +11,7 @@ from datetime import datetime
 SAMPLE_SIZE = 2
 NUM_CLASSES = 2
 N_INPUT = 784
+#NAME = "simulation_customized"
 NAME = "simulation_var0.7"
 PRIROR = 1
 NUM_MIX = 3
@@ -431,7 +432,7 @@ class alpha_beta_net():
         with tf.variable_scope('input', reuse=None):
             self.x = tf.placeholder(tf.float32, shape=[None, N_INPUT],name='x')
             self.y = tf.placeholder(tf.float32, shape=[None, NUM_CLASSES+1],name='y')
-            self.weights = tf.Variable(np.array([[1,1,1]]),dtype=tf.float32, name="distribution_weights")
+            self.weights = tf.Variable(np.repeat(1, NUM_MIX),dtype=tf.float32, name="distribution_weights")
 
         with tf.variable_scope('hyperparameter', reuse=None):
             self.keep_prob = tf.placeholder(tf.float32, name='dropout')
@@ -439,6 +440,7 @@ class alpha_beta_net():
             self.learning_rate = tf.placeholder(tf.float32, name='learning_rate')
             tf.summary.scalar('learning_rate', self.learning_rate)
             self.global_steps = tf.Variable(0,dtype=tf.int32,name='globel_steps')
+            self.global_steps2 = tf.Variable(0,dtype=tf.int32,name='globel_steps')
 
         with tf.variable_scope('alpha_net', reuse=None):
             self.alpha_net = conv_net('alpha_net')
@@ -464,8 +466,6 @@ class alpha_beta_net():
 
     def __define_measure__(self):
         def beta_likelihood(pred1, pred2, y, weights):
-            #pred1 = tf.nn.elu(pred1)+1
-            #pred2 = tf.nn.elu(pred2)+1
             label = tf.reshape(y, shape = [-1, 1, y.shape[1].value])
             deno = tf.reshape(tf.multiply(
                 tf.add(pred1,pred2),
@@ -476,7 +476,7 @@ class alpha_beta_net():
                 shape=[-1,NUM_MIX,1])
             nomi3 = tf.reshape(tf.multiply(pred2, pred2+1),
                 shape=[-1,NUM_MIX,1])
-            #return likelihood, tf.reduce_sum(tf.multiply(likelihood, y),1)
+
             likelihood = tf.div(
                 tf.concat([nomi1, nomi2, nomi3],2),
                 deno)
@@ -526,18 +526,27 @@ class alpha_beta_net():
         with tf.variable_scope('optimization'):
             opt = tf.train.AdamOptimizer(learning_rate=learning_rate)
             gradient = opt.compute_gradients(self.cost)
+            #print(gradient)
             self.gg = [i for i,j in gradient if i is not None]
-            gradient = [(
+            gradient1 = [(
                 tf.multiply(
                     tf.sign(i),
                     tf.clip_by_value(i, 1e-2, 1e2)),
                 j)
             for i,j in gradient if i is not None]
-            self.optimizer = opt.apply_gradients(gradient, global_step = self.global_steps)
+            gradient2 = [(
+                tf.multiply(
+                    tf.sign(i),
+                    tf.clip_by_value(i, 1e-2, 1e2)),
+                j)
+            for i,j in gradient if j is self.weights]
+            self.optimizer = opt.apply_gradients(gradient1, global_step = self.global_steps)
+            self.optimizer2 = opt.apply_gradients(gradient2, global_step = self.global_steps2)
             self.virtual_optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(self.virtual_cost)
 
-    def train_net(self, virtual, training_iters = 40000, learning_rate = 0.001, batch_size = 128,
-                  display_step = 10, dropout = 0.75, strides = [1,2,1,2,1,2,1,2]):
+    def train_net(self, virtual, training_iters = 40000, training_iters2=5000,learning_rate = 0.001,
+        learning_rate2 = 0.001,batch_size = 128, batch_size2 = 128, display_step = 10, display_step2 = 10,
+        dropout = 0.75, strides = [1,2,1,2,1,2,1,2]):
         # Initializing network
         self.__construct_net__(strides=strides)
         self.__define_measure__()
@@ -551,7 +560,7 @@ class alpha_beta_net():
             step = 1
             validation = np.array([])
             if virtual is True:
-                print("virtual train start...")
+                print("virtual training starts...")
                 while step * 128 <= 3000:
                     batch_x, batch_y = self.data.train.next_batch(128)
                     # Run optimization op (backprop)
@@ -570,13 +579,9 @@ class alpha_beta_net():
                                                          self.keep_prob: 1.})
                         print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + \
                               "{:.6f}".format(loss))
-                        """
-                        a = input("continue?")
-                        if a != "":
-                            break
-                        """
+
                     step += 1
-                print("virtual train finished...")
+                print("virtual training finished...\n")
 
             step = 1
             # Record train data
@@ -586,6 +591,7 @@ class alpha_beta_net():
 
             # Keep training until reach max iterations
             #batch_x, batch_y = self.data.train.next_batch(batch_size)
+            print("Stage 1 training starts...")
             while step * batch_size <= training_iters:
                 batch_x, batch_y = self.data.train.next_batch(batch_size)
                 # Run optimization op (backprop)
@@ -606,10 +612,32 @@ class alpha_beta_net():
                           "{:.6f}".format(loss) + ", Training Accuracy= " + \
                           "{:.5f}".format(acc))
 
-                    #print(g)
-                    #print(gg)
+                step += 1
+            print("Stage 1 training finished...\n")
+
+            step = 1
+            print("Stage 2 training starts...")
+            while step * batch_size2 <= training_iters2:
+                batch_x, batch_y = self.data.train.next_batch(batch_size2)
+                # Run optimization op (backprop)
+                sess.run(self.optimizer2,feed_dict={self.x: batch_x,
+                                                  self.y: batch_y,
+                                                  self.keep_prob: dropout,
+                                                  self.learning_rate: learning_rate2})
+                #train_writer.add_summary(summary, step)
+                # display training intermediate result
+                if step % display_step2 == 0:
+                    # Calculate batch loss and accuracy
+                    loss, acc,g,gg = sess.run([self.cost,self.accuracy,self.true_value, self.likelihood],
+                                          feed_dict={self.x: batch_x,
+                                                     self.y: batch_y,
+                                                     self.keep_prob: 1.})
+                    print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + \
+                          "{:.6f}".format(loss) + ", Training Accuracy= " + \
+                          "{:.5f}".format(acc))
 
                 step += 1
+            print("Stage 2 training finished...\n")
 
             print("Optimization finished")
             # Calculate test loss
@@ -662,8 +690,6 @@ def evaludate(alpha,beta,prob, test_opt):
         return x*y/(x+y)**2/(x+y+1)
     var = variance(alpha, beta)
     prob_hat = alpha/(alpha+beta)
-    #alpha = np.reshape(alpha,alpha.shape[0])
-    #beta = np.reshape(beta,beta.shape[0])
     prob = prob[:, 0]
     a = []
     b = []
@@ -682,11 +708,6 @@ def evaludate(alpha,beta,prob, test_opt):
     plt.savefig(str(time.hour)+":"+str(time.minute)+"_"+NAME+"_"+test_opt+".jpg")
     print("evaluation finished")
 
-        #print("{:.2f}% of real probability falls in the {:.1f}% prediction interval".format(
-        #    100*np.sum(a)/a.shape[0],
-        #    pct*100))
-        #
-
 
 def mix_pct(alpha, beta, pct, weights):
     """
@@ -700,14 +721,10 @@ def mix_pct(alpha, beta, pct, weights):
         """
         binary search for percentile
         """
-        #print(pct)
         while True:
             mid = (start + end)/2.0
-            #print(mid)
-
             r_pct = 1 - np.sum((1 - stats.beta.cdf(mid, alpha, beta))*weights)/np.sum(weights)
-            #print(r_pct)
-            #c = input("prompt")
+
             if abs(r_pct - pct) <= JUDGE:
                 #print(r_pct - pct)
                 break
@@ -715,16 +732,7 @@ def mix_pct(alpha, beta, pct, weights):
                 start = mid
             else:
                 end = mid
-        """
-        mid = (start + end)/2.0
-        r_pct = 1 - np.sum((1 - stats.beta.cdf(mid, alpha, beta))*weights)/np.sum(weights)
-        if abs(r_pct - pct) <= JUDGE:
-            return mid
-        elif r_pct < pct:
-            return binary_search(mid, end, alpha, beta, pct)
-        elif r_pct > pct:
-            return binary_search(start, mid, alpha, beta, pct)
-        """
+
         return mid
     return binary_search(0, 1, alpha, beta, pct)
 
@@ -759,42 +767,31 @@ def interval(alpha, beta, pct, weights):
                 start = mix_pct(alpha, beta, 1 - pct, weights)
                 end = 1
         return np.array([start, end])
-    """
-    result = np.apply_along_axis(intvl, 1, dist[:BATCH,:])
-    for i in range(1, dist.shape[0]//BATCH):
-        a = i*BATCH
-        b = (i+1)*BATCH
-        result = np.concatenate(
-            (result, np.apply_along_axis(intvl, 1, dist[a:b,:])),
-            axis=0)
-        print(i)
-    result = np.concatenate(
-        (result, np.apply_along_axis(intvl, 1, dist[b:,:])),
-        axis=0)
-    return result
-    """
+
     return np.apply_along_axis(intvl, 1, dist)
 
 def evaluate_mix(alpha,beta,prob, weights, test_opt):
-    print("start evaluation...")
-    #print(test_opt)
+    print("start evaluation " + test_opt +"...")
+
     prob = prob[:, 0]
     a = []
     b = []
-    for i in range(75,100):
+    for i in range(90,100):
         pct = i/100.0
+        print(pct)
         bound = interval(alpha, beta, pct, weights)
         judge = (bound[:,0] <= prob) & (bound[:,1] >= prob)
-        a.append(np.sum(judge)/judge.shape[0]*100.0)
-        b.append(i)
-        print(a[-1])
+        a.append(np.sum(judge)/judge.shape[0])
+        b.append(pct)
     print(a)
+
     df = pd.DataFrame({"estimator":a, "real value":b})
+    df.index = df.ix[:,1]
     df.plot(title = "Prediction Interval")
     plt.show()
     time = datetime.now()
-    #print(a)
     plt.savefig(str(time.hour)+":"+str(time.minute)+"_"+NAME+"_"+test_opt+".jpg")
+
     print("evaluation finished")
 
 
@@ -810,15 +807,22 @@ def main():
     train_alpha, train_beta, test_alpha, test_beta, weights = abnet.train_net(
         virtual = True,
         training_iters=50000,
+        training_iters2=5000,
         learning_rate=0.0002,
+        learning_rate2=0.001,
         batch_size=128,
+        batch_size2=128,
         display_step=20,
+        display_step2=5,
         dropout=1.)
+    """
     evaluate_mix(
         train_alpha,
         train_beta,
         abnet.data.train.probs.copy(),
+        weights,
         "train")
+    """
     evaluate_mix(
         test_alpha,
         test_beta,
@@ -828,45 +832,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-"""
-import tensorflow as tf
-import numpy as np
-a = tf.placeholder(tf.float32, shape=[None, 3])
-b = tf.placeholder(tf.float32, shape=[None, 3])
-deno = tf.reshape(tf.multiply(tf.add(a,b),tf.add(tf.add(a,b),1)),shape=[-1,3,1])
-nomi1 = tf.reshape(tf.multiply(a, a+1),shape=[-1,3,1])
-nomi2 = tf.reshape(2*tf.multiply(a,b),shape=[-1,3,1])
-nomi3 = tf.reshape(tf.multiply(b, b+1),shape=[-1,3,1])
-dd = tf.concat([nomi1, nomi2, nomi3],2)
-#result = tf.div(tf.concat([nomi1, nomi2, nomi3],1), deno)
-result = tf.div(dd, deno)
-y = tf.placeholder(tf.float32, shape=[None, 3])
-s = tf.reshape(y, [-1,y.shape[1].value, 1])
-res = tf.multiply(result, s)
-init = tf.global_variables_initializer()
 
-with tf.Session() as sess:
-    sess.run(init)
-    a1,a2,a3,b1,d1,re,r = sess.run([nomi1,nomi2,nomi3,deno,dd,result,res],feed_dict={
-        a: np.array([[1,0,1],[0,1,1]]),
-        b: np.array([[1,0,0],[0,1,0]]),
-        y: np.array([[1,0,0],[0,1,0]])
-        })
-    print(a1.shape)
-    print(a2.shape)
-    print(a3.shape)
-    #print(b1)
-    #print(d1)
-    print(re)
-    print(r)
-    #cc = sess.run(result, feed_dict={
-    #    a: np.array([[1,0,1],[0,1,1],[1,1,0]]),
-    #    b: np.array([[1,0,0],[0,1,0],[0,0,1]])
-    #    })
-weights = tf.Variable(np.array([[1/3,1/3,1/3]]),dtype=tf.float32, name="distribution_weights")
-init = tf.global_variables_initializer()
-with tf.Session() as sess:
-    sess.run(init)
-    w = sess.run(weights)
-    print(w.shape)
-"""
