@@ -16,6 +16,7 @@ from numpy.linalg import norm
 
 VAR1 = 0.5
 VAR2 = 0.7
+VAR3 = 1.0
 
 def mean(l):
     return sum(l)/len(l)
@@ -558,7 +559,7 @@ class group_simulate_data(simulate_data):
         self.validation = group_data_set(X_validation,y_validation,self._group_size)
         print("Split data finished...")
 
-def data_generation2(pred, X, y, sample_size=2):
+def data_generation2(pred, X, y, var, sample_size=2):
     """
     Data generation function. Generate more than 1 labels for each input
 
@@ -582,22 +583,34 @@ def data_generation2(pred, X, y, sample_size=2):
     print(X.shape)
     # softmax with soften operation
     pred = pred[correct_pred, :]/4
-    pred = pred[:,0] - pred[:,1]
+    pred = pred - pred[:,1][:,None]
     # generate random normal noise
-    var = norm(X, axis=1)/15
-    rand = np.random.normal(loc=0,
-                            scale=var,
-                            size=X.shape[0])
+    #var = norm(X, axis=1)/15
     # add noise to data
-    pred += rand
-    pred = np.concatenate((pred[:,None], np.repeat(0.0,X.shape[0])[:,None]),axis=1)
-    dist = np.exp(pred) / np.sum(np.exp(pred),axis=1)[:, None]
-    # define sample methods
-    f = lambda x: np.random.choice(range(dist.shape[1]),size=sample_size, p=x)
-    labels = np.sum(np.apply_along_axis(f, 1, dist), axis=1)
+    for i in range(sample_size):
+        p = pred
+        rand = np.random.normal(loc=0,
+                        scale=var,
+                        size=X.shape[0])
+        p[:,0] += rand
+        #pred = np.concatenate((pred[:,None], np.repeat(0.0,X.shape[0])[:,None]),axis=1)
+        dist = np.exp(pred) / np.sum(np.exp(pred),axis=1)[:, None]
+        # define sample methods
+        f = lambda x: np.random.choice(range(dist.shape[1]),size=1, p=x)
+        if i == 0:
+            labels = np.sum(np.apply_along_axis(f, 1, dist), axis=1)
+            prob = dist[:, 0]
+        elif i == 1:
+            labels += np.sum(np.apply_along_axis(f, 1, dist), axis=1)
+            prob = np.vstack([prob, dist[:, 0]]).transpose()
+        else:
+            labels += np.sum(np.apply_along_axis(f, 1, dist), axis=1)
+            prob = np.concatenate([prob, dist[:, 0][:, None]], axis = 1)
+    #prob = np.concatenate([prob, pred[:, 0][:, None]], axis = 1)
+    print(prob.shape)
     print("Data Generation finished...")
     # return new input and labels
-    return X, np.eye(sample_size+1)[labels], dist
+    return X, np.eye(sample_size+1)[labels], prob
 
 def main():
     """main function"""
@@ -609,22 +622,40 @@ def main():
                     batch_size=128, display_step=100, dropout=1)
     # sample new labels
     """
-    X,y,dist = data_generation(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
+    X,y,dist = data_generation2(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
                            y=gdnet.data.train.labels.copy(), var=VAR1, sample_size=2)
     data = simulate_data(X=X, y=y,prob=dist)
     data.to_file(name="simulation_var"+str(VAR1), path="./simulation_data")
-    X,y,dist = data_generation(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
+    X,y,dist = data_generation2(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
                            y=gdnet.data.train.labels.copy(), var=VAR2, sample_size=2)
     data = simulate_data(X=X, y=y,prob=dist)
     data.to_file(name="simulation_var"+str(VAR2), path="./simulation_data")
-    """
+    X,y,dist = data_generation2(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
+                           y=gdnet.data.train.labels.copy(), var=VAR3, sample_size=2)
+    data = simulate_data(X=X, y=y,prob=dist)
+    data.to_file(name="simulation_var"+str(VAR3), path="./simulation_data")
+
     X,y,dist = data_generation2(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
         y=gdnet.data.train.labels.copy(), sample_size=2)
     data = simulate_data(X=X, y=y,prob=dist)
     data.to_file(name="simulation_customized", path="./simulation_data")
+    """
     # for non-group data
     #data = simulate_data(X=X, y=y)
     #data.to_file(name="simulation",path="./simulation_data")
+    #
+    X,y,dist = data_generation2(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
+                           y=gdnet.data.train.labels.copy(), var=VAR1, sample_size=5)
+    data = simulate_data(X=X, y=y,prob=dist)
+    data.to_file(name="simulation_var"+str(VAR1)+"sample5", path="./simulation_data")
+    X,y,dist = data_generation2(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
+                           y=gdnet.data.train.labels.copy(), var=VAR2, sample_size=5)
+    data = simulate_data(X=X, y=y,prob=dist)
+    data.to_file(name="simulation_var"+str(VAR2)+"sample5", path="./simulation_data")
+    X,y,dist = data_generation2(pred=gdnet.pred.copy(), X=gdnet.data.train.images.copy(),
+                           y=gdnet.data.train.labels.copy(), var=VAR3, sample_size=5)
+    data = simulate_data(X=X, y=y,prob=dist)
+    data.to_file(name="simulation_var"+str(VAR3)+"sample5", path="./simulation_data")
 
     return gdnet
 

@@ -1,20 +1,20 @@
 import tensorflow as tf
 import numpy as np
-from math import sqrt
-from data_generate import data_set,simulate_data
+from math import sqrt, pi
 import pandas as pd
 import scipy.stats as stats
-import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
+from data_generate import data_set,simulate_data
+from scipy.special import comb
 
 SAMPLE_SIZE = 2
 NUM_CLASSES = 2
 N_INPUT = 784
 #NAME = "simulation_customized"
-NAME = "simulation_var0.7"
-PRIROR = 1
-NUM_MIX = 3
+NAME = "simulation_var1.0"
+PRIROR = 2
+NUM_MIX = 5
 # Parameters, set seed
 np.random.seed(seed=1)
 W = np.random.normal(0,1,size=(N_INPUT, NUM_CLASSES))
@@ -465,6 +465,7 @@ class alpha_beta_net():
                 variable_summaries(self.beta_net.out, 'values')
 
     def __define_measure__(self):
+
         def beta_likelihood(pred1, pred2, y, weights):
             label = tf.reshape(y, shape = [-1, 1, y.shape[1].value])
             deno = tf.reshape(tf.multiply(
@@ -476,12 +477,37 @@ class alpha_beta_net():
                 shape=[-1,NUM_MIX,1])
             nomi3 = tf.reshape(tf.multiply(pred2, pred2+1),
                 shape=[-1,NUM_MIX,1])
-
-            likelihood = tf.div(
-                tf.concat([nomi1, nomi2, nomi3],2),
-                deno)
+            nomi = tf.concat([nomi1, nomi2, nomi3],2)
+            likelihood = tf.div(nomi,deno)
             w = tf.reshape(weights, shape=[1,NUM_MIX,1])
-            tf.reduce_sum(tf.multiply(likelihood, w)/tf.reduce_sum(weights),1)
+            true_value = tf.reduce_sum(tf.multiply(likelihood, label),2)
+            return tf.reduce_sum(
+                tf.multiply(likelihood, w)/tf.reduce_sum(weights),1), tf.div(
+                tf.reduce_sum(tf.multiply(true_value, weights),1),
+                tf.reduce_sum(weights))
+
+        def beta_likelihood2(pred1, pred2, y, weights):
+            label = tf.reshape(y, shape = [-1, 1, y.shape[1].value])
+            def f(pred, k):
+                if k == -1:
+                    return tf.ones_like(pred)
+                if k == 0:
+                    return pred
+                return tf.multiply(pred, f(pred+1.0, k-1))
+
+            N = y.shape[1].value - 1
+            deno = tf.reshape(f(pred1+pred2, N-1),
+                shape = [-1,NUM_MIX,1])
+            nomi = []
+            for i in range(0,N+1):
+                nomi1 = tf.reshape(
+                    comb(N,i)*tf.multiply(f(pred1, N-i-1),f(pred2, i-1)),
+                    shape = [-1,NUM_MIX,1])
+                nomi.append(nomi1)
+
+            nomi = tf.concat(nomi,2)
+            likelihood = tf.div(nomi,deno)
+            w = tf.reshape(weights, shape=[1,NUM_MIX,1])
             true_value = tf.reduce_sum(tf.multiply(likelihood, label),2)
             return tf.reduce_sum(
                 tf.multiply(likelihood, w)/tf.reduce_sum(weights),1), tf.div(
@@ -491,13 +517,13 @@ class alpha_beta_net():
         def bernoulli(pred1, pred2, y):
             p = tf.nn.softmax(tf.concat([pred1, pred2], axis=1))
             nomi1 = tf.reshape(tf.pow(p[:,0], 2), shape=[-1,-1,1])
-            print(nomi1)
+            #print(nomi1)
             nomi2 = 2*tf.reshape(tf.multiply(p[:,0], p[:,1]), shape=[-1,-1,1])
             nomi3 = tf.reshape(tf.pow(p[:,1], 2), shape=[-1,1])
             likelihood = tf.concat([nomi1, nomi2, nomi3], axis=1)
             return likelihood, tf.reduce_sum(tf.multiply(likelihood,y),1)
 
-        likelihood, true_value = beta_likelihood(self.alpha_net.out2,self.beta_net.out2, self.y,self.weights)
+        likelihood, true_value = beta_likelihood2(self.alpha_net.out2,self.beta_net.out2, self.y,self.weights)
 
 
         #likelihood, true_value = bernoulli(self.alpha_net.out,self.beta_net.out,self.y)
@@ -585,7 +611,7 @@ class alpha_beta_net():
 
             step = 1
             # Record train data
-            # $ tensorboard --logdir=./summary_abnet
+            # $ tensorboard --logdir=./tensorboard_simunet
             train_writer = tf.summary.FileWriter('./tensorboard_simunet',
                                                   sess.graph)
 
@@ -657,7 +683,7 @@ class alpha_beta_net():
                 beta.append(b)
             print(test_opt+" loss= {:.6f}".format(sum(loss)/len(loss)) +
                 ", "+test_opt+" accuracy= {:.5f}".format(sum(accu)/len(accu)))
-
+            test_loss = sum(loss)/len(loss)
             test_a, test_b = np.concatenate(alpha, axis=0), np.concatenate(beta,axis=0)
 
             loss,accu,alpha,beta = [],[], [], []
@@ -681,7 +707,7 @@ class alpha_beta_net():
 
             w = sess.run(self.weights)
 
-            return train_a, train_b, test_a, test_b,w
+            return train_a, train_b, test_a, test_b,w, test_loss
 
 def evaludate(alpha,beta,prob, test_opt):
     print("start evaluation...")
@@ -707,7 +733,6 @@ def evaludate(alpha,beta,prob, test_opt):
     #print(a)
     plt.savefig(str(time.hour)+":"+str(time.minute)+"_"+NAME+"_"+test_opt+".jpg")
     print("evaluation finished")
-
 
 def mix_pct(alpha, beta, pct, weights):
     """
@@ -736,6 +761,22 @@ def mix_pct(alpha, beta, pct, weights):
         return mid
     return binary_search(0, 1, alpha, beta, pct)
 
+def mix_pct_newton(alpha, beta, pct, weights):
+    """
+    beta distribution mixture percentile
+    alpha: numpy array like, size = [NUM_MIX, 1]
+    beta: numpy array like, size = [NUM_MIX, 1]
+    pct: percentile
+    """
+    delta = 0.000001
+    x = 0.5
+    r_pct = 1 - np.sum((1 - stats.beta.cdf(x, alpha, beta))*weights)/np.sum(weights)
+    if abs(r_pct - pct) > delta:
+        f = np.sum((stats.beta.pdf(x, alpha, beta)*weights))/np.sum(weights)
+        x = x - (r_pct - pct)/f
+        r_pct = 1 - np.sum((1 - stats.beta.cdf(x, alpha, beta))*weights)/np.sum(weights)
+    return x
+
 def interval(alpha, beta, pct, weights):
     """
     single side confidence interval
@@ -752,6 +793,7 @@ def interval(alpha, beta, pct, weights):
         alpha = alpha_beta[:NUM_MIX]
         beta = alpha_beta[NUM_MIX:]
         r_pct = 1 - np.sum((1 - stats.beta.cdf(0.5, alpha, beta))*weights)/np.sum(weights)
+        """
         if pct >= 0:
             if r_pct <= 0.5:
                 start = mix_pct(alpha, beta, 1 - pct, weights)
@@ -760,40 +802,71 @@ def interval(alpha, beta, pct, weights):
                 start = 0
                 end = mix_pct(alpha_beta[:NUM_MIX], alpha_beta[NUM_MIX:], pct, weights)
         else:
+            #print("haha")
             if r_pct <= 0.5:
                 start = 0
                 end = mix_pct(alpha_beta[:NUM_MIX], alpha_beta[NUM_MIX:], pct, weights)
             else:
                 start = mix_pct(alpha, beta, 1 - pct, weights)
                 end = 1
+        """
+        if r_pct <= 0.5:
+            start = mix_pct(alpha, beta, 1 - pct, weights)
+            end = 1
+        else:
+            start = 0
+            end = mix_pct(alpha_beta[:NUM_MIX], alpha_beta[NUM_MIX:], pct, weights)
         return np.array([start, end])
 
     return np.apply_along_axis(intvl, 1, dist)
 
-def evaluate_mix(alpha,beta,prob, weights, test_opt):
+def evaluate_mix(alpha,beta,prob, weights, test_opt,loss):
     print("start evaluation " + test_opt +"...")
 
-    prob = prob[:, 0]
+    #prob = prob[:, 0]
     a = []
     b = []
-    for i in range(90,100):
+    for i in range(75,100):
         pct = i/100.0
         print(pct)
         bound = interval(alpha, beta, pct, weights)
-        judge = (bound[:,0] <= prob) & (bound[:,1] >= prob)
-        a.append(np.sum(judge)/judge.shape[0])
+        s = 0
+        for j in range(prob.shape[1]):
+            judge = (bound[:,0] <= prob[:,j]) & (bound[:,1] >= prob[:,j])
+            s += np.sum(judge)/judge.shape[0]
+        a.append(s/(prob.shape[1]))
         b.append(pct)
     print(a)
+    print(b)
 
     df = pd.DataFrame({"estimator":a, "real value":b})
-    df.index = df.ix[:,1]
+    df.index = df.iloc[:,1]
     df.plot(title = "Prediction Interval")
     plt.show()
     time = datetime.now()
-    plt.savefig(str(time.hour)+":"+str(time.minute)+"_"+NAME+"_"+test_opt+".jpg")
+    plt.savefig(str(time.hour)+":"+str(time.minute)+"_"+NAME+"_"+test_opt+"_loss"+str(loss)+".jpg")
 
     print("evaluation finished")
 
+def plot_mixture(alpha, beta, weights, true_prob,variance=0.7):
+    x = np.linspace(0, 1, 1000)
+    #f1 = lambda k: np.sum((stats.beta.pdf(k, alpha, beta)*weights))/np.sum(weights)
+    #y1 = x.apply(f1)
+    y1 = np.array([np.sum((stats.beta.pdf(k, alpha, beta)*weights))/np.sum(weights) for k in x])
+    #f2 = lambda k: stats.norm.pdf(k, true_prob[0], variance)
+    #y2 = x.apply(f2)
+    #y2 = np.array([stats.norm.pdf(np.log(k/(1-k)), true_prob, variance) for k in x])
+    f = lambda k: 1/sqrt(2*pi*variance)*1/(k*(1-k))*np.exp(-(np.log(k/(1-k)) - true_prob)**2/(2*variance))
+    y2 = np.array([f(k) for k in x])
+    #print(y2.shape)
+    #y2 = 1/(1 + np.exp(-y2))
+    plt.figure()
+    plt.plot(x,y1,"b-",x, y2, "r-")
+    plt.xlabel("x")
+    plt.ylabel("p")
+    plt.ylim(0,10)
+    plt.title("Probability Density of Beta Mixture and Logistic-Normal")
+    plt.show()
 
 def main():
     #X,y,p = generate(70000)
@@ -804,11 +877,11 @@ def main():
         prob_file=NAME+"_probs.npz")
     #data = simulate_data(X=X, y=y,prob=p)
     abnet = alpha_beta_net(data)
-    train_alpha, train_beta, test_alpha, test_beta, weights = abnet.train_net(
+    train_alpha, train_beta, test_alpha, test_beta, weights, test_loss = abnet.train_net(
         virtual = True,
-        training_iters=50000,
+        training_iters=20000,
         training_iters2=5000,
-        learning_rate=0.0002,
+        learning_rate=0.0005,
         learning_rate2=0.001,
         batch_size=128,
         batch_size2=128,
@@ -826,10 +899,26 @@ def main():
     evaluate_mix(
         test_alpha,
         test_beta,
-        abnet.data.test.probs.copy(),
         weights,
-        "test")
+        abnet.data.test.probs[:,:-1].copy(),
+        "test",
+        loss = test_loss)
+    for i in range(0,5):
+        plot_mixture(test_alpha[i,:], test_beta[i,:], weights, abnet.data.test.probs[i,-1])
 
 if __name__ == '__main__':
     main()
 
+"""
+a =
+loss =
+b = list(range(75,100))/100
+test_opt = "test"
+df = pd.DataFrame({"estimator":a, "real value":b})
+df.index = df.iloc[:,1]
+df.plot(title = "Prediction Interval")
+plt.show()
+
+#time = datetime.now()
+#plt.savefig(str(time.hour)+":"+str(time.minute)+"_"+NAME+"_"+test_opt+"_loss"+str(loss)+".jpg")
+"""
